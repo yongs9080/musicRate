@@ -3,20 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <title>Music Rate</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- 1. menu bar -->
-    <nav>
-        <button id="tab-home">홈</button>
-        <button id="tab-search">검색</button>
-        <button id="tab-mypage">마이페이지</button>
-    </nav>
+    <header class="site-header">
+        <div class="logo" id="logo-link" role="button" tabindex="0">
+            <img src="images/main-logo.png" alt="Music Rate 로고" />
+        </div>
+
+        <nav>
+            <button id="tab-home" class="tab active" data-tab="home" type="button">홈</button>
+            <button id="tab-search" class="tab" data-tab="search" type="button">검색</button>
+            <button id="tab-mypage" class="tab" data-tab="mypage" type="button">마이페이지</button>
+        </nav>
+    </header>
 
     <!-- 2. main space -->
-    <main id="content-display">
-        <h1>홈 화면</h1>
-        <p>이것저것</p>
-    </main>
+    <main id="content-display" aria-live="polite"></main>
+
+    <script type="module" src="app.js"></script>
 </body>
 </html>
