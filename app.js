@@ -1,14 +1,14 @@
 const contentDisplay = document.getElementById('content-display');
 const tabButtons = document.querySelectorAll('button[data-tab]');
 
-function createCoverImage(label) {
+function createCoverImage(labelText) {
     const svg = `
         <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
             <rect width="160" height="160" rx="24" fill="#e9eefc" />
             <rect x="24" y="24" width="112" height="112" rx="18" fill="#4169e1" opacity="0.16" />
             <circle cx="80" cy="72" r="28" fill="#4169e1" opacity="0.85" />
             <path d="M64 96c12 10 22 14 32 14" stroke="#ffffff" stroke-width="8" stroke-linecap="round" />
-            <text x="80" y="138" text-anchor="middle" font-size="18" font-family="Arial, sans-serif" fill="#1f2937">${label}</text>
+            <text x="80" y="138" text-anchor="middle" font-size="18" font-family="Arial, sans-serif" fill="#1f2937">${labelText}</text>
         </svg>
     `;
 
@@ -29,26 +29,6 @@ const pages = {
         },
         {
             type: 'list',
-            title: '음악 랭킹',
-            layout: 'horizontal',
-            items: [
-                { title: 'New Skyline', artist: 'Ari', year: '2024', rating: '4.9', image: createCoverImage('NS') },
-                { title: 'Velvet Night', artist: 'Rin', year: '2023', rating: '4.8', image: createCoverImage('VN') },
-                { title: 'Ocean Light', artist: 'Jin', year: '2022', rating: '4.7', image: createCoverImage('OL') }
-            ]
-        },
-        {
-            type: 'list',
-            title: '평점 높은 앨범',
-            layout: 'horizontal',
-            items: [
-                { title: 'Golden Hour', artist: 'Sora', year: '2021', rating: '4.9', image: createCoverImage('GH') },
-                { title: 'Neon Echo', artist: 'Kai', year: '2020', rating: '4.8', image: createCoverImage('NE') },
-                { title: 'Moonlit Drive', artist: 'Dae', year: '2019', rating: '4.7', image: createCoverImage('MD') }
-            ]
-        },
-        {
-            type: 'list',
             title: '최근 평가',
             layout: 'horizontal',
             items: [
@@ -58,14 +38,36 @@ const pages = {
             ]
         }
     ],
+    genre: [
+        {
+            type: 'list',
+            title: '장르별 추천',
+            description: '장르를 기준으로 음악을 탐색해보세요.',
+            items: ['팝', '재즈', '락', '랩', '클래식']
+        }
+    ],
+    review: [
+        {
+            type: 'list',
+            title: '최근 리뷰',
+            description: '사용자 리뷰와 평점이 표시됩니다.',
+            items: ['새 앨범 리뷰', '인디 음악 추천', '평점 높은 곡 소개']
+        }
+    ],
+    community: [
+        {
+            type: 'list',
+            title: '커뮤니티',
+            description: '다른 유저와 음악 이야기를 나눠보세요.',
+            items: ['최신 토론', '추천 음악 공유', '좋아요한 리뷰 보기']
+        }
+    ],
     search: [
         {
-            type: 'search',
-            title: '검색',
-            description: '곡 제목 또는 아티스트를 입력해서 음악을 찾아보세요.',
-            placeholder: '검색어를 입력하세요',
-            buttonText: '검색',
-            resultsText: '검색 결과가 여기에 표시됩니다.'
+            type: 'list',
+            title: '검색 결과',
+            description: '검색어에 대한 음악을 확인하세요.',
+            items: []
         }
     ],
     mypage: [
@@ -108,32 +110,13 @@ function createListSection(section) {
     `;
 }
 
-function createSearchSection(section) {
-    return `
-        <section class="content-card">
-            <h2>${section.title}</h2>
-            <p>${section.description}</p>
-            <input type="text" id="search-input" placeholder="${section.placeholder}" />
-            <button class="action" id="search-action">${section.buttonText}</button>
-            <div id="search-results" class="content-card" style="margin-top: 18px;">
-                <p>${section.resultsText}</p>
-            </div>
-        </section>
-    `;
+function renderSections(sectionsData) {
+    return sectionsData.map((section) => createListSection(section)).join('');
 }
 
-function renderSections(sections) {
-    return sections.map((section) => {
-        if (section.type === 'search') {
-            return createSearchSection(section);
-        }
-        return createListSection(section);
-    }).join('');
-}
-
-function setActiveTab(selectedTab) {
+function setActiveTab(activeTab) {
     tabButtons.forEach((button) => {
-        button.classList.toggle('active', button.dataset.tab === selectedTab);
+        button.classList.toggle('active', button.dataset.tab === activeTab);
     });
 }
 
@@ -141,19 +124,6 @@ function renderPage(pageKey) {
     const pageSections = pages[pageKey] || pages.home;
     contentDisplay.innerHTML = renderSections(pageSections);
     setActiveTab(pageKey);
-
-    if (pageKey === 'search') {
-        const searchInput = document.getElementById('search-input');
-        const searchAction = document.getElementById('search-action');
-        const searchResults = document.getElementById('search-results');
-
-        searchAction.addEventListener('click', () => {
-            const query = searchInput.value.trim();
-            searchResults.innerHTML = query
-                ? `<p>“${query}” 검색 결과가 아직 준비 중입니다.</p>`
-                : `<p>검색어를 입력해주세요.</p>`;
-        });
-    }
 }
 
 tabButtons.forEach((button) => {

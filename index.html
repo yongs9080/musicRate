@@ -4,22 +4,28 @@
     <meta charset="UTF-8">
     <title>Music Rate</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="images/small-logo.png" type="image/png">
 </head>
 <body>
-
     <header class="site-header">
         <div class="logo" id="logo-link" role="button" tabindex="0">
             <img src="images/main-logo.png" alt="Music Rate 로고" />
         </div>
 
-        <nav>
-            <button id="tab-home" class="tab active" data-tab="home" type="button">홈</button>
-            <button id="tab-search" class="tab" data-tab="search" type="button">검색</button>
-            <button id="tab-mypage" class="tab" data-tab="mypage" type="button">마이페이지</button>
+        <nav class="top-nav">
+            <div class="nav-group nav-group-left">
+                <button id="tab-home" class="tab active" data-tab="home" type="button">홈</button>
+                <button id="tab-genre" class="tab" data-tab="genre" type="button">장르별</button>
+                <button id="tab-review" class="tab" data-tab="review" type="button">리뷰</button>
+                <button id="tab-community" class="tab" data-tab="community" type="button">커뮤니티</button>
+            </div>
+            <div class="nav-group nav-group-right">
+                <input id="tab-search" class="tab" data-tab="search" type="text" placeholder="곡/아티스트 검색"></input>
+                <button id="tab-mypage" class="tab" data-tab="mypage" type="button">마이페이지</button>
+            </div>
         </nav>
     </header>
 
-    <!-- 2. main space -->
     <main id="content-display" aria-live="polite"></main>
 
     <script type="module" src="app.js"></script>
