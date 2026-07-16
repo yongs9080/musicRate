@@ -71,9 +71,6 @@ nav.top-nav {
     background-color: #d1d5db;
 }
 
-
-
-
 .nav-group-right {
     margin-left: auto;
     display: flex;
@@ -81,6 +78,48 @@ nav.top-nav {
     gap: 10px;
     flex-wrap: nowrap;
     justify-content: flex-end;
+    position: relative;
+}
+
+.hidden {
+    display: none !important;
+}
+
+#search-panel {
+    position: absolute;
+    right: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: clamp(360px, 42vw, 420px);
+    max-width: none;
+    margin: 0;
+    padding: 9px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    background: #f8fafc;
+    color: #111111;
+}
+
+#tab-search,
+#tab-mypage {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+#tab-search {
+    width: clamp(360px, 42vw, 420px);
+    flex: 0 0 clamp(360px, 42vw, 420px);
+    padding: 9px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    background: #f8fafc;
+    color: #111111;
+}
+
+#tab-search:hover,
+#tab-search:focus-visible {
+    background: #eef2f7;
+    color: #111111;
 }
 
 button.tab {
@@ -257,6 +296,18 @@ button.action:hover {
 
     nav {
         gap: 8px;
+    }
+
+    #search-panel {
+        position: static;
+        transform: none;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    #tab-search {
+        width: 100%;
+        flex-basis: 100%;
     }
 
     main {

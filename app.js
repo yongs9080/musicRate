@@ -1,5 +1,7 @@
 const contentDisplay = document.getElementById('content-display');
 const tabButtons = document.querySelectorAll('button[data-tab]');
+const searchPanel = document.getElementById('search-panel');
+const tabSearch = document.getElementById('tab-search');
 
 function createCoverImage(labelText) {
     const svg = `
@@ -126,23 +128,48 @@ function renderPage(pageKey) {
     setActiveTab(pageKey);
 }
 
+function resetSearchTabState() {
+    if (searchPanel && tabSearch) {
+        searchPanel.classList.add('hidden');
+        tabSearch.classList.remove('hidden');
+    }
+}
+
 tabButtons.forEach((button) => {
     button.addEventListener('click', () => {
-        renderPage(button.dataset.tab);
+        const selectedTab = button.dataset.tab;
+
+        if (selectedTab === 'search') {
+            if (tabSearch && searchPanel) {
+                tabSearch.classList.add('hidden');
+                searchPanel.classList.remove('hidden');
+                searchPanel.focus();
+            }
+        } else {
+            resetSearchTabState();
+        }
+
+        renderPage(selectedTab);
     });
 });
 
 const logoLink = document.getElementById('logo-link');
 if (logoLink) {
     logoLink.addEventListener('click', () => {
+        resetSearchTabState();
         renderPage('home');
     });
     logoLink.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
+            resetSearchTabState();
             renderPage('home');
         }
     });
 }
+
+
+
+
 
 renderPage('home');
