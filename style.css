@@ -181,6 +181,47 @@ main {
 
 }
 
+.profile-card {
+    margin-bottom: 28px;
+}
+
+.action-card {
+    margin-bottom: 28px;
+}
+
+.mypage-action-link {
+    width: fit-content;
+    min-width: 220px;
+    padding: 10px 18px;
+}
+
+.profile-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 0 4px;
+}
+
+.profile-avatar {
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid #dbeafe;
+    background: #eff6ff;
+}
+
+.profile-meta h2 {
+    margin: 0;
+    font-size: 1.4rem;
+    color: #111111;
+}
+
+.profile-meta p {
+    margin: 4px 0 0;
+    color: #4b5563;
+}
+
 .content-card p,
 .content-card li {
     line-height: 1.7;
@@ -231,6 +272,25 @@ ul.horizontal-list li.content-card-item {
     border-radius: 0;
     flex-shrink: 0;
     background: #e5e7eb;
+}
+
+.item-cover-wrap {
+    position: relative;
+    width: 100%;
+}
+
+.item-type-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(17, 24, 39, 0.78);
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
 }
 
 .item-details {
@@ -312,5 +372,9 @@ button.action:hover {
 
     main {
         padding: 20px;
+    }
+
+    .profile-header {
+        align-items: flex-start;
     }
 }
