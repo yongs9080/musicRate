@@ -111,6 +111,119 @@ function isFilterMatch(item, filterKey) {
     return true;
 }
 
+function normalizeSearchText(value) {
+    return (value || '')
+        .toString()
+        .toLowerCase()
+        .replace(/[^a-z0-9가-힣\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function tokenizeSearchText(value) {
+    return normalizeSearchText(value).split(' ').filter(Boolean);
+}
+
+function toYearNumber(value) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function getTypeKey(item) {
+    if (item?.typeLabel === '앨범') {
+        return 'album';
+    }
+
+    if (item?.typeLabel === '음악') {
+        return 'song';
+    }
+
+    return 'all';
+}
+
+function postProcessResults(searchResults, term, preferredFilter = 'all') {
+    const normalizedTerm = normalizeSearchText(term);
+    const tokens = tokenizeSearchText(term);
+    const shouldApplyHardFilter = normalizedTerm.length >= 2;
+
+    const scoredResults = searchResults.map((item, index) => {
+        const title = normalizeSearchText(item?.title);
+        const artist = normalizeSearchText(item?.artist);
+        let score = 0;
+
+        if (normalizedTerm && title === normalizedTerm) {
+            score += 120;
+        } else if (normalizedTerm && title.startsWith(normalizedTerm)) {
+            score += 70;
+        } else if (normalizedTerm && title.includes(normalizedTerm)) {
+            score += 45;
+        }
+
+        if (normalizedTerm && artist === normalizedTerm) {
+            score += 140;
+        } else if (normalizedTerm && artist.startsWith(normalizedTerm)) {
+            score += 90;
+        } else if (normalizedTerm && artist.includes(normalizedTerm)) {
+            score += 60;
+        }
+
+        let matchedTokenCount = 0;
+        tokens.forEach((token) => {
+            if (title.includes(token)) {
+                score += 18;
+                matchedTokenCount += 1;
+            }
+
+            if (artist.includes(token)) {
+                score += 10;
+                matchedTokenCount += 1;
+            }
+        });
+
+        const typeKey = getTypeKey(item);
+        if (preferredFilter !== 'all' && typeKey === preferredFilter) {
+            score += 15;
+        }
+
+        if (!item?.image) {
+            score -= 3;
+        }
+
+        return {
+            item,
+            score,
+            matchedTokenCount,
+            index
+        };
+    }).filter(({ item, matchedTokenCount, score }) => {
+        if (!shouldApplyHardFilter) {
+            return true;
+        }
+
+        if (score <= 0) {
+            return false;
+        }
+
+        if (matchedTokenCount > 0) {
+            return true;
+        }
+
+        const title = normalizeSearchText(item?.title);
+        const artist = normalizeSearchText(item?.artist);
+        return title.includes(normalizedTerm) || artist.includes(normalizedTerm);
+    });
+
+    scoredResults.sort((a, b) => {
+        if (b.score !== a.score) {
+            return b.score - a.score;
+        }
+
+        return a.index - b.index;
+    });
+
+    return scoredResults.map(({ item }) => item);
+}
+
 function setSearchFilterState(filterKey) {
     const normalizedFilter = ['all', 'album', 'song'].includes(filterKey) ? filterKey : 'all';
     currentSearchFilter = normalizedFilter;
@@ -162,8 +275,9 @@ async function searchAndRender(term) {
 
     try {
         const [songResults, albumResults] = await Promise.all([
-            searchItunesMedia({ term: normalizedTerm, entity: 'song', limit: 20 }),
-            searchItunesMedia({ term: normalizedTerm, entity: 'album', limit: 20 })
+            searchItunesMedia({ term: normalizedTerm, entity: 'song', attribute: 'songTerm', limit: 20 }),
+            searchItunesMedia({ term: normalizedTerm, entity: 'album', attribute: 'albumTerm', limit: 20 }),
+            searchItunesMedia({ term: normalizedTerm, entity: 'song', attribute: 'artistTerm', limit: 20 })
         ]);
         if (requestId !== latestSearchRequestId) {
             return;
@@ -175,7 +289,8 @@ async function searchAndRender(term) {
                 mergedMap.set(item.id, item);
             }
         });
-        const results = Array.from(mergedMap.values());
+        const mergedResults = Array.from(mergedMap.values());
+        const results = postProcessResults(mergedResults, normalizedTerm, currentSearchFilter);
         latestSearchResults = results;
         setSearchFilterState('all');
 

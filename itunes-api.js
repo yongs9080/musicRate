@@ -48,7 +48,7 @@ function mapItunesItemToMedia(item) {
     };
 }
 
-export async function searchItunesMedia({ term, entity = 'song', limit = 10 }) {
+export async function searchItunesMedia({ term, entity = 'song', attribute, limit = 10 }) {
     const query = new URLSearchParams({
         term,
         media: 'music',
@@ -57,6 +57,10 @@ export async function searchItunesMedia({ term, entity = 'song', limit = 10 }) {
         lang: 'ko_kr',
         limit: String(limit)
     });
+
+    if (attribute) {
+        query.set('attribute', attribute);
+    }
 
     const response = await fetch(`${ITUNES_SEARCH_URL}?${query.toString()}`);
     if (!response.ok) {
