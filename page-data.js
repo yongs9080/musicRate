@@ -41,7 +41,7 @@ function normalizeId(text) {
         .replace(/[^a-z0-9\-]/g, '') || 'item';
 }
 
-function createMediaItem({ id, title, artist, year, rating, imageLabel, image, typeLabel = '음악' }) {
+function createMediaItem({ id, title, artist, year, rating, myRating, imageLabel, image, typeLabel = '음악' }) {
     const resolvedTitle = title || 'Untitled';
 
     return {
@@ -50,6 +50,7 @@ function createMediaItem({ id, title, artist, year, rating, imageLabel, image, t
         artist: artist || 'Unknown',
         year: year || '-',
         rating: rating || '-',
+        myRating,
         typeLabel,
         image: image || createCoverImage(imageLabel || resolvedTitle.slice(0, 2).toUpperCase())
     };
@@ -88,6 +89,18 @@ function createActionSectionData({ label, targetPage }) {
         type: 'action',
         label,
         targetPage
+    };
+}
+
+function createSearchFilterSectionData() {
+    return {
+        type: 'search-filter',
+        activeFilter: 'all',
+        options: [
+            { key: 'all', label: '전체' },
+            { key: 'album', label: '앨범' },
+            { key: 'song', label: '음악' }
+        ]
     };
 }
 
@@ -132,7 +145,8 @@ export const pages = {
         })
     ],
     search: [
-        createTextListSection({
+        createSearchFilterSectionData(),
+        createHorizontalMediaSection({
             title: '검색 결과',
             description: '검색어에 대한 음악을 확인하세요.',
             items: []
@@ -143,10 +157,10 @@ export const pages = {
             title: '내가 평가한 음악',
             description: '내가 최근 평가한 음악 목록입니다.',
             items: [
-                createMediaItem({ title: 'Night Runner', artist: 'Luca', year: '2025', rating: '4.6', imageLabel: 'NR', typeLabel: '음악' }),
-                createMediaItem({ title: 'Ocean Lights', artist: 'Yuna', year: '2024', rating: '4.9', imageLabel: 'OL', typeLabel: '음악' }),
+                createMediaItem({ title: 'Night Runner', artist: 'Luca', year: '2025', rating: '4.6', myRating: '4.5', imageLabel: 'NR', typeLabel: '음악' }),
+                createMediaItem({ title: 'Ocean Lights', artist: 'Yuna', year: '2024', rating: '4.9', myRating: '5.0', imageLabel: 'OL', typeLabel: '음악' }),
                 createMediaItem({ title: 'Slow Orbit', artist: 'Keen', year: '2023', rating: '4.7', imageLabel: 'SO', typeLabel: '음악' }),
-                createMediaItem({ title: 'Velvet Sky', artist: 'Iris', year: '2022', rating: '4.5', imageLabel: 'VS', typeLabel: '음악' })
+                createMediaItem({ title: 'Velvet Sky', artist: 'Iris', year: '2022', rating: '4.5', myRating: '4.0', imageLabel: 'VS', typeLabel: '음악' })
             ]
         })
     ],
@@ -171,8 +185,8 @@ export const pages = {
         createHorizontalMediaSection({
             title: '최근 평가한 음악',
             items: [
-                createMediaItem({ title: 'Night Runner', artist: 'Luca', year: '2025', rating: '4.6', imageLabel: 'NR', typeLabel: '음악' }),
-                createMediaItem({ title: 'Ocean Lights', artist: 'Yuna', year: '2024', rating: '4.9', imageLabel: 'OL', typeLabel: '음악' }),
+                createMediaItem({ title: 'Night Runner', artist: 'Luca', year: '2025', rating: '4.6', myRating: '4.5', imageLabel: 'NR', typeLabel: '음악' }),
+                createMediaItem({ title: 'Ocean Lights', artist: 'Yuna', year: '2024', rating: '4.9', myRating: '5.0', imageLabel: 'OL', typeLabel: '음악' }),
                 createMediaItem({ title: 'Slow Orbit', artist: 'Keen', year: '2023', rating: '4.7', imageLabel: 'SO', typeLabel: '음악' })
             ]
         })

@@ -5,6 +5,8 @@ function createListSection(section) {
     const sectionItems = Array.isArray(section.items) ? section.items : [];
     const itemsMarkup = sectionItems.map((item) => {
         if (section.layout === 'horizontal' && typeof item === 'object') {
+            const myRatingMarkup = item.myRating ? `<div class="item-my-rating">내 평점 ★ ${item.myRating}</div>` : '';
+
             return `
                 <li class="content-card-item" data-item-id="${item.id || ''}">
                     <div class="item-cover-wrap">
@@ -16,7 +18,10 @@ function createListSection(section) {
                         <span>${item.artist}</span>
                         <span>${item.year}</span>
                     </div>
-                    <div class="item-rating">★ ${item.rating}</div>
+                    <div class="item-ratings">
+                        <div class="item-rating">★ ${item.rating}</div>
+                        ${myRatingMarkup}
+                    </div>
                 </li>
             `;
         }
@@ -56,6 +61,20 @@ function createActionSection(section) {
     `;
 }
 
+function createSearchFilterSection(section) {
+    const options = Array.isArray(section.options) ? section.options : [];
+    const buttonsMarkup = options.map((option) => {
+        const activeClass = section.activeFilter === option.key ? ' active' : '';
+        return `<button class="search-filter-button${activeClass}" type="button" data-search-filter="${option.key}">${option.label}</button>`;
+    }).join('');
+
+    return `
+        <section class="content-card search-filter-card">
+            <div class="search-filter-bar">${buttonsMarkup}</div>
+        </section>
+    `;
+}
+
 export function renderSections(sectionsData) {
     return sectionsData.map((section) => {
         if (section.type === 'profile') {
@@ -64,6 +83,10 @@ export function renderSections(sectionsData) {
 
         if (section.type === 'action') {
             return createActionSection(section);
+        }
+
+        if (section.type === 'search-filter') {
+            return createSearchFilterSection(section);
         }
 
         return createListSection(section);

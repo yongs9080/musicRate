@@ -189,6 +189,40 @@ main {
     margin-bottom: 28px;
 }
 
+.search-filter-card {
+    margin-bottom: 16px;
+}
+
+.search-filter-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.search-filter-button {
+    border: 1px solid #d1d5db;
+    background: #ffffff;
+    color: #374151;
+    border-radius: 999px;
+    padding: 7px 12px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.search-filter-button:hover,
+.search-filter-button:focus-visible {
+    border-color: #93c5fd;
+    color: #1d4ed8;
+    outline: none;
+}
+
+.search-filter-button.active {
+    background: #e0edff;
+    color: #1d4ed8;
+    border-color: #93c5fd;
+}
+
 .mypage-action-link {
     width: fit-content;
     min-width: 220px;
@@ -317,6 +351,26 @@ ul.horizontal-list li.content-card-item {
     border-radius: 999px;
     background: #eef2ff;
     color: #4169e1;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.item-ratings {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 14px 14px;
+}
+
+.item-ratings .item-rating {
+    margin: 0;
+}
+
+.item-my-rating {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #fff4e6;
+    color: #c2410c;
     font-weight: 700;
     white-space: nowrap;
 }
