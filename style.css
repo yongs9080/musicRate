@@ -297,6 +297,15 @@ ul.horizontal-list li.content-card-item {
     border-radius: 18px;
     overflow: hidden;
     box-shadow: 0 6px 16px rgba(17, 24, 39, 0.06);
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+ul.horizontal-list li.content-card-item:hover,
+ul.horizontal-list li.content-card-item:focus-visible {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 22px rgba(17, 24, 39, 0.12);
+    outline: none;
 }
 
 .item-cover {
@@ -375,6 +384,84 @@ ul.horizontal-list li.content-card-item {
     white-space: nowrap;
 }
 
+.detail-card {
+    margin-bottom: 0;
+}
+
+.detail-back-link,
+.detail-back-button {
+    border: none;
+    background: transparent;
+    color: #1d4ed8;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0;
+    margin-bottom: 16px;
+}
+
+.detail-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 320px) 1fr;
+    gap: 24px;
+    align-items: start;
+}
+
+.detail-cover {
+    width: 100%;
+    border-radius: 18px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 8px 22px rgba(17, 24, 39, 0.08);
+    background: #e5e7eb;
+}
+
+.detail-content h2 {
+    margin: 8px 0 6px;
+    font-size: 1.9rem;
+}
+
+.detail-type {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #1d4ed8;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.detail-artist {
+    margin: 0 0 22px;
+    color: #4b5563;
+    font-size: 1.05rem;
+}
+
+.detail-meta-grid {
+    display: grid;
+    gap: 10px;
+    max-width: 360px;
+}
+
+.detail-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #f9fafb;
+}
+
+.detail-meta-label {
+    color: #6b7280;
+    font-size: 0.9rem;
+}
+
+.detail-meta-value {
+    color: #111827;
+}
+
 input[type="text"],
 button.action {
     width: 100%;
@@ -430,5 +517,14 @@ button.action:hover {
 
     .profile-header {
         align-items: flex-start;
+    }
+
+    .detail-layout {
+        grid-template-columns: 1fr;
+        gap: 18px;
+    }
+
+    .detail-content h2 {
+        font-size: 1.55rem;
     }
 }

@@ -1,6 +1,6 @@
 import { pages, pageActiveTabMap } from './page-data.js';
 import { renderSections } from './render-sections.js';
-import { searchItunesMedia } from './itunes-api.js';
+import { searchSpotifyMedia } from './spotify-api.js';
 
 const contentDisplay = document.getElementById('content-display');
 const tabButtons = document.querySelectorAll('button[data-tab]');
@@ -11,10 +11,13 @@ const HOME_RECOMMEND_SECTION_INDEX = 0;
 const SEARCH_FILTER_SECTION_INDEX = 0;
 const SEARCH_RESULTS_SECTION_INDEX = 1;
 const SEARCH_DEBOUNCE_MS = 300;
+const DETAIL_HASH_PREFIX = 'detail/';
 let searchDebounceTimer = null;
 let latestSearchRequestId = 0;
 let currentSearchFilter = 'all';
 let latestSearchResults = [];
+let currentDetailItemId = null;
+let currentDetailSourcePageKey = 'home';
 
 function getValidPageKey(pageKey) {
     return pages[pageKey] ? pageKey : 'home';
@@ -50,6 +53,110 @@ function renderPage(pageKey) {
     contentDisplay.innerHTML = renderSections(pageSections);
     setActiveTab(pageActiveTabMap[resolvedPageKey] || resolvedPageKey);
     currentPageKey = resolvedPageKey;
+    currentDetailItemId = null;
+}
+
+function collectMediaItemsFromSections(sections) {
+    if (!Array.isArray(sections)) {
+        return [];
+    }
+
+    return sections.flatMap((section) => {
+        if (!Array.isArray(section?.items)) {
+            return [];
+        }
+
+        return section.items.filter((item) => item && typeof item === 'object' && item.id);
+    });
+}
+
+function findMediaItemById(itemId) {
+    if (!itemId) {
+        return null;
+    }
+
+    const staticItems = Object.values(pages).flatMap((sections) => collectMediaItemsFromSections(sections));
+    const dynamicItems = latestSearchResults.filter((item) => item && typeof item === 'object' && item.id);
+    const allItems = [...dynamicItems, ...staticItems];
+
+    return allItems.find((item) => item.id === itemId) || null;
+}
+
+function renderDetailPage(itemId, sourcePageKey = currentPageKey) {
+    const mediaItem = findMediaItemById(itemId);
+    const resolvedSourcePageKey = getValidPageKey(sourcePageKey);
+
+    if (!mediaItem) {
+        contentDisplay.innerHTML = `
+            <section class="content-card detail-card">
+                <h2>상세 정보를 찾을 수 없습니다.</h2>
+                <p>선택한 음악/앨범 정보를 다시 불러와 주세요.</p>
+                <button class="action detail-back-button" type="button" data-route="${resolvedSourcePageKey}">이전 페이지로</button>
+            </section>
+        `;
+        setActiveTab(pageActiveTabMap[resolvedSourcePageKey] || resolvedSourcePageKey);
+        currentPageKey = 'detail';
+        currentDetailItemId = null;
+        currentDetailSourcePageKey = resolvedSourcePageKey;
+        return;
+    }
+
+    const myRatingMarkup = mediaItem.myRating ? `
+        <div class="detail-meta-row">
+            <span class="detail-meta-label">내 평점</span>
+            <strong class="detail-meta-value">★ ${mediaItem.myRating}</strong>
+        </div>
+    ` : '';
+
+    contentDisplay.innerHTML = `
+        <section class="content-card detail-card">
+            <button class="detail-back-link" type="button" data-route="${resolvedSourcePageKey}">← 이전으로</button>
+            <div class="detail-layout">
+                <img class="detail-cover" src="${mediaItem.image || ''}" alt="${mediaItem.title}" />
+                <div class="detail-content">
+                    <span class="detail-type">${mediaItem.typeLabel || '음악'}</span>
+                    <h2>${mediaItem.title}</h2>
+                    <p class="detail-artist">${mediaItem.artist}</p>
+                    <div class="detail-meta-grid">
+                        <div class="detail-meta-row">
+                            <span class="detail-meta-label">발매 연도</span>
+                            <strong class="detail-meta-value">${mediaItem.year || '-'}</strong>
+                        </div>
+                        <div class="detail-meta-row">
+                            <span class="detail-meta-label">평점</span>
+                            <strong class="detail-meta-value">★ ${mediaItem.rating || '-'}</strong>
+                        </div>
+                        ${myRatingMarkup}
+                    </div>
+                </div>
+            </div>
+        </section>
+    `;
+
+    setActiveTab(pageActiveTabMap[resolvedSourcePageKey] || resolvedSourcePageKey);
+    currentPageKey = 'detail';
+    currentDetailItemId = itemId;
+    currentDetailSourcePageKey = resolvedSourcePageKey;
+}
+
+function parseRouteFromHash(hashValue) {
+    const normalizedHash = (hashValue || '').replace(/^#/, '').trim();
+
+    if (!normalizedHash) {
+        return { type: 'page', pageKey: 'home' };
+    }
+
+    if (normalizedHash.startsWith(DETAIL_HASH_PREFIX)) {
+        return {
+            type: 'detail',
+            itemId: decodeURIComponent(normalizedHash.slice(DETAIL_HASH_PREFIX.length))
+        };
+    }
+
+    return {
+        type: 'page',
+        pageKey: getValidPageKey(normalizedHash)
+    };
 }
 
 function getHomeRecommendSection() {
@@ -275,9 +382,8 @@ async function searchAndRender(term) {
 
     try {
         const [songResults, albumResults] = await Promise.all([
-            searchItunesMedia({ term: normalizedTerm, entity: 'song', attribute: 'songTerm', limit: 20 }),
-            searchItunesMedia({ term: normalizedTerm, entity: 'album', attribute: 'albumTerm', limit: 20 }),
-            searchItunesMedia({ term: normalizedTerm, entity: 'song', attribute: 'artistTerm', limit: 20 })
+            searchSpotifyMedia({ term: normalizedTerm, entity: 'song', limit: 10 }),
+            searchSpotifyMedia({ term: normalizedTerm, entity: 'album', limit: 10 })
         ]);
         if (requestId !== latestSearchRequestId) {
             return;
@@ -324,30 +430,30 @@ async function searchAndRender(term) {
     }
 }
 
-async function hydrateHomeRecommendationsFromItunes() {
+async function hydrateHomeRecommendationsFromSpotify() {
     const section = getHomeRecommendSection();
     if (!section) {
         return;
     }
 
-    updateHomeRecommendDescription('iTunes 추천 데이터를 불러오는 중입니다.');
+    updateHomeRecommendDescription('Spotify 추천 데이터를 불러오는 중입니다.');
     rerenderIfCurrentPageIsHome();
 
     try {
-        const recommendedItems = await searchItunesMedia({ term: 'kpop', entity: 'song', limit: 10 });
+        const recommendedItems = await searchSpotifyMedia({ term: 'kpop', entity: 'song', limit: 10 });
 
         if (!recommendedItems.length) {
-            updateHomeRecommendDescription('iTunes에서 결과를 찾지 못해 기본 추천 목록을 표시합니다.');
+            updateHomeRecommendDescription('Spotify에서 결과를 찾지 못해 기본 추천 목록을 표시합니다.');
             rerenderIfCurrentPageIsHome();
             return;
         }
 
         section.items = recommendedItems;
-        updateHomeRecommendDescription('iTunes 기반 실시간 추천 목록입니다.');
+        updateHomeRecommendDescription('Spotify 기반 실시간 추천 목록입니다.');
         rerenderIfCurrentPageIsHome();
     } catch (error) {
         console.error(error);
-        updateHomeRecommendDescription('iTunes 연결에 실패해 기본 추천 목록을 표시합니다.');
+        updateHomeRecommendDescription('Spotify 연결에 실패해 기본 추천 목록을 표시합니다.');
         rerenderIfCurrentPageIsHome();
     }
 }
@@ -366,6 +472,19 @@ function navigateToPage(pageKey, options = {}) {
 
     if (pushHistory) {
         history.pushState({ pageKey: resolvedPageKey }, '', `#${resolvedPageKey}`);
+    }
+}
+
+function navigateToDetail(itemId, options = {}) {
+    const { pushHistory = true, sourcePageKey = currentPageKey } = options;
+    const resolvedSourcePageKey = getValidPageKey(sourcePageKey);
+
+    setSearchPageState('detail', false);
+    renderDetailPage(itemId, resolvedSourcePageKey);
+
+    if (pushHistory) {
+        const encodedId = encodeURIComponent(itemId || '');
+        history.pushState({ pageKey: 'detail', itemId, sourcePageKey: resolvedSourcePageKey }, '', `#${DETAIL_HASH_PREFIX}${encodedId}`);
     }
 }
 
@@ -451,6 +570,16 @@ contentDisplay.addEventListener('click', (event) => {
         return;
     }
 
+    const mediaCard = event.target.closest('.content-card-item[data-item-id]');
+    if (mediaCard) {
+        const itemId = mediaCard.dataset.itemId;
+        if (itemId) {
+            const sourcePageKey = currentPageKey === 'detail' ? currentDetailSourcePageKey : currentPageKey;
+            navigateToDetail(itemId, { pushHistory: true, sourcePageKey });
+        }
+        return;
+    }
+
     const routeButton = event.target.closest('[data-route]');
     if (!routeButton) {
         return;
@@ -460,6 +589,26 @@ contentDisplay.addEventListener('click', (event) => {
     if (targetPage && pages[targetPage]) {
         navigateToPage(targetPage, { pushHistory: true });
     }
+});
+
+contentDisplay.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+        return;
+    }
+
+    const mediaCard = event.target.closest('.content-card-item[data-item-id]');
+    if (!mediaCard) {
+        return;
+    }
+
+    event.preventDefault();
+    const itemId = mediaCard.dataset.itemId;
+    if (!itemId) {
+        return;
+    }
+
+    const sourcePageKey = currentPageKey === 'detail' ? currentDetailSourcePageKey : currentPageKey;
+    navigateToDetail(itemId, { pushHistory: true, sourcePageKey });
 });
 
 const logoLink = document.getElementById('logo-link');
@@ -476,12 +625,26 @@ if (logoLink) {
 }
 
 window.addEventListener('popstate', (event) => {
+    const routeFromHash = parseRouteFromHash(window.location.hash);
     const statePageKey = event.state?.pageKey;
-    const hashPageKey = window.location.hash.replace('#', '');
-    navigateToPage(statePageKey || hashPageKey || 'home', { pushHistory: false });
+
+    if (statePageKey === 'detail' || routeFromHash.type === 'detail') {
+        const itemId = event.state?.itemId || routeFromHash.itemId;
+        const sourcePageKey = event.state?.sourcePageKey || currentDetailSourcePageKey || 'home';
+        navigateToDetail(itemId, { pushHistory: false, sourcePageKey });
+        return;
+    }
+
+    navigateToPage(statePageKey || routeFromHash.pageKey || 'home', { pushHistory: false });
 });
 
-const initialPageKey = getValidPageKey(window.location.hash.replace('#', ''));
-navigateToPage(initialPageKey, { pushHistory: false });
-history.replaceState({ pageKey: initialPageKey }, '', `#${initialPageKey}`);
-hydrateHomeRecommendationsFromItunes();
+const initialRoute = parseRouteFromHash(window.location.hash);
+if (initialRoute.type === 'detail') {
+    navigateToDetail(initialRoute.itemId, { pushHistory: false, sourcePageKey: 'home' });
+    history.replaceState({ pageKey: 'detail', itemId: initialRoute.itemId, sourcePageKey: 'home' }, '', window.location.hash || '#home');
+} else {
+    const initialPageKey = getValidPageKey(initialRoute.pageKey);
+    navigateToPage(initialPageKey, { pushHistory: false });
+    history.replaceState({ pageKey: initialPageKey }, '', `#${initialPageKey}`);
+}
+hydrateHomeRecommendationsFromSpotify();

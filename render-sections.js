@@ -8,7 +8,7 @@ function createListSection(section) {
             const myRatingMarkup = item.myRating ? `<div class="item-my-rating">내 평점 ★ ${item.myRating}</div>` : '';
 
             return `
-                <li class="content-card-item" data-item-id="${item.id || ''}">
+                <li class="content-card-item" data-item-id="${item.id || ''}" role="button" tabindex="0" aria-label="${item.title} 상세 보기">
                     <div class="item-cover-wrap">
                         <img class="item-cover" src="${item.image || createCoverImage(item.title)}" alt="${item.title}" />
                         <span class="item-type-badge">${item.typeLabel || '음악'}</span>
