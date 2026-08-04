@@ -1,11 +1,41 @@
 import { createCoverImage } from './page-data.js';
 
+const RATING_OPTIONS = Array.from({ length: 10 }, (_, index) => ((index + 1) / 2).toFixed(1));
+
+export function renderRatingEditor(item, className = '') {
+    if (!item?.id) {
+        return '';
+    }
+
+    const currentValue = item.myRating ? Number(item.myRating).toFixed(1) : '';
+    const optionsMarkup = [`<option value="">선택 안 함</option>`]
+        .concat(RATING_OPTIONS.map((value) => `<option value="${value}"${currentValue === value ? ' selected' : ''}>${value}</option>`))
+        .join('');
+    const editorClassName = className ? `rating-editor ${className}` : 'rating-editor';
+
+    return `
+        <label class="${editorClassName}" data-rating-editor>
+            <span class="rating-editor-label">내 평점</span>
+            <select class="rating-select" data-rating-select data-item-id="${item.id}">
+                ${optionsMarkup}
+            </select>
+        </label>
+    `;
+}
+
 function createListSection(section) {
     const listClass = section.layout === 'horizontal' ? 'content-list horizontal-list' : 'content-list';
     const sectionItems = Array.isArray(section.items) ? section.items : [];
     const itemsMarkup = sectionItems.map((item) => {
         if (section.layout === 'horizontal' && typeof item === 'object') {
+            const ratingMarkup = item.rating && item.rating !== '-' ? `<div class="item-rating">★ ${item.rating}</div>` : '';
             const myRatingMarkup = item.myRating ? `<div class="item-my-rating">내 평점 ★ ${item.myRating}</div>` : '';
+            const ratingsMarkup = ratingMarkup || myRatingMarkup ? `
+                <div class="item-ratings">
+                    ${ratingMarkup}
+                    ${myRatingMarkup}
+                </div>
+            ` : '';
 
             return `
                 <li class="content-card-item" data-item-id="${item.id || ''}" role="button" tabindex="0" aria-label="${item.title} 상세 보기">
@@ -18,9 +48,9 @@ function createListSection(section) {
                         <span>${item.artist}</span>
                         <span>${item.year}</span>
                     </div>
-                    <div class="item-ratings">
-                        <div class="item-rating">★ ${item.rating}</div>
-                        ${myRatingMarkup}
+                    ${ratingsMarkup}
+                    <div class="item-rating-editor-wrap">
+                        ${renderRatingEditor(item)}
                     </div>
                 </li>
             `;

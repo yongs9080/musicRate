@@ -1,2 +1,4 @@
 .env
 node_modules/
+music-rate.sqlite
+music-rate.sqlite-*
