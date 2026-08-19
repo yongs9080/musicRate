@@ -9,9 +9,11 @@ import {
     createSessionForUser,
     deleteRating,
     deleteSession,
+    findUserById,
     findUserBySessionId,
     getRatingsByItemIds,
     listRatingsByUser,
+    updateUserProfile,
     upsertUserFromAuthAccount,
     upsertRating
 } from './ratings-db.js';
@@ -69,6 +71,13 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_SEARCH_URL = 'https://api.spotify.com/v1/search';
 const SPOTIFY_ALBUMS_URL = 'https://api.spotify.com/v1/albums';
+const MAX_PROFILE_NAME_LENGTH = 40;
+const MAX_PROFILE_AVATAR_BYTES = 5 * 1024 * 1024;
+const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || '';
+const CLOUDINARY_UPLOAD_PRESET = process.env.CLOUDINARY_UPLOAD_PRESET || '';
+const CLOUDINARY_UPLOAD_URL = CLOUDINARY_CLOUD_NAME
+    ? `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`
+    : '';
 
 let cachedAccessToken = '';
 let accessTokenExpiresAt = 0;
@@ -264,6 +273,91 @@ function validateRatingValue(value) {
 
 function validateItemType(value) {
     return value === 'song' || value === 'album';
+}
+
+function validateProfileDisplayName(value) {
+    return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_PROFILE_NAME_LENGTH;
+}
+
+function validateProfileAvatarUrl(value) {
+    if (value == null || value === '') {
+        return true;
+    }
+
+    if (typeof value !== 'string') {
+        return false;
+    }
+
+    const normalizedValue = value.trim();
+    if (!normalizedValue) {
+        return false;
+    }
+
+    try {
+        const parsedUrl = new URL(normalizedValue);
+        return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+async function readMultipartFile(req) {
+    const contentType = req.headers['content-type'] || '';
+    const boundaryMatch = contentType.match(/boundary=([^;]+)/);
+    if (!boundaryMatch) {
+        throw new Error('multipart boundary not found');
+    }
+
+    const boundary = boundaryMatch[1].trim();
+    const chunks = [];
+    for await (const chunk of req) {
+        chunks.push(chunk);
+    }
+
+    const raw = Buffer.concat(chunks);
+    if (raw.length > MAX_PROFILE_AVATAR_BYTES) {
+        throw new Error('파일 크기가 5MB를 초과합니다.');
+    }
+
+    const delimiter = Buffer.from(`\r\n--${boundary}`);
+    const parts = [];
+    let start = raw.indexOf(`--${boundary}`) + `--${boundary}`.length;
+
+    while (start < raw.length) {
+        const end = raw.indexOf(delimiter, start);
+        const partEnd = end === -1 ? raw.length : end;
+        const part = raw.slice(start, partEnd);
+        const headerEnd = part.indexOf('\r\n\r\n');
+        if (headerEnd === -1) {
+            break;
+        }
+
+        const headerText = part.slice(0, headerEnd).toString();
+        const data = part.slice(headerEnd + 4);
+        parts.push({ headerText, data });
+
+        if (end === -1) {
+            break;
+        }
+
+        start = end + delimiter.length;
+    }
+
+    for (const { headerText, data } of parts) {
+        const nameMatch = headerText.match(/name="([^"]+)"/);
+        const filenameMatch = headerText.match(/filename="([^"]+)"/);
+        const contentTypeMatch = headerText.match(/Content-Type:\s*([^\r\n]+)/);
+
+        if (nameMatch?.[1] === 'file' && filenameMatch) {
+            return {
+                filename: filenameMatch[1],
+                mimeType: (contentTypeMatch?.[1] || 'application/octet-stream').trim(),
+                data
+            };
+        }
+    }
+
+    throw new Error('파일 필드를 찾을 수 없습니다.');
 }
 
 async function readJsonBody(req) {
@@ -659,6 +753,133 @@ async function handleLogoutApi(req, res) {
     sendOk(res, 200);
 }
 
+async function handleUpdateMyProfileApi(req, res) {
+    if (req.method !== 'PUT') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    const user = requireAuthenticatedUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    let body;
+    try {
+        body = await readJsonBody(req);
+    } catch {
+        sendError(res, 400, 'INVALID_JSON', 'request body must be valid JSON');
+        return;
+    }
+
+    const displayName = (body?.displayName || '').toString();
+    const avatarUrl = body?.avatarUrl == null ? '' : body.avatarUrl.toString();
+
+    if (!validateProfileDisplayName(displayName)) {
+        sendError(res, 400, 'INVALID_DISPLAY_NAME', 'displayName must be between 1 and 40 characters.');
+        return;
+    }
+
+    if (!validateProfileAvatarUrl(avatarUrl)) {
+        sendError(res, 400, 'INVALID_AVATAR_URL', 'avatarUrl must be an http/https URL or data:image payload under 2MB.');
+        return;
+    }
+
+    try {
+        const updatedUser = updateUserProfile({
+            userId: user.id,
+            displayName,
+            avatarUrl
+        });
+        sendOk(res, 200, updatedUser);
+    } catch (error) {
+        sendError(res, 500, 'UPDATE_PROFILE_FAILED', error instanceof Error ? error.message : '프로필 저장 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleUploadAvatarApi(req, res) {
+    if (req.method !== 'POST') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    const user = requireAuthenticatedUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+        sendError(res, 503, 'CLOUDINARY_NOT_CONFIGURED', 'Cloudinary 환경변수가 설정되지 않았습니다.');
+        return;
+    }
+
+    let file;
+    try {
+        file = await readMultipartFile(req);
+    } catch (error) {
+        sendError(res, 400, 'INVALID_FILE', error instanceof Error ? error.message : '파일을 읽지 못했습니다.');
+        return;
+    }
+
+    if (!file.mimeType.startsWith('image/')) {
+        sendError(res, 400, 'INVALID_FILE_TYPE', '이미지 파일만 업로드할 수 있습니다.');
+        return;
+    }
+
+    try {
+        // public_id는 사용자 ID 기반으로 고정해 업로드마다 덮어쓰도록 합니다.
+        const publicId = `musicrate/avatars/${user.id}`;
+
+        const form = new FormData();
+        form.append('file', new Blob([file.data], { type: file.mimeType }), file.filename);
+        form.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+        form.append('public_id', publicId);
+
+        const uploadResponse = await fetch(CLOUDINARY_UPLOAD_URL, { method: 'POST', body: form });
+        const uploadPayload = await uploadResponse.json();
+
+        if (!uploadResponse.ok) {
+            throw new Error(uploadPayload?.error?.message || `Cloudinary 업로드 실패: ${uploadResponse.status}`);
+        }
+
+        const secureUrl = uploadPayload.secure_url;
+        sendOk(res, 200, { avatarUrl: secureUrl });
+    } catch (error) {
+        sendError(res, 500, 'UPLOAD_FAILED', error instanceof Error ? error.message : '이미지 업로드 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleGetPublicUserProfileApi(req, res, userId) {
+    if (req.method !== 'GET') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    if (!userId) {
+        sendError(res, 400, 'INVALID_USER_ID', 'userId is required');
+        return;
+    }
+
+    try {
+        const user = findUserById(userId);
+        if (!user) {
+            sendError(res, 404, 'USER_NOT_FOUND', '사용자를 찾을 수 없습니다.');
+            return;
+        }
+
+        sendOk(res, 200, {
+            id: user.id,
+            displayName: user.displayName,
+            avatarUrl: user.avatarUrl,
+            bio: user.bio,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+        });
+    } catch (error) {
+        sendError(res, 500, 'GET_USER_FAILED', error instanceof Error ? error.message : '사용자 조회 중 오류가 발생했습니다.');
+    }
+}
+
 async function handlePutRatingApi(req, res) {
     if (req.method !== 'PUT') {
         sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
@@ -851,6 +1072,16 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    if (requestUrl.pathname === '/api/profile') {
+        await handleUpdateMyProfileApi(req, res);
+        return;
+    }
+
+    if (requestUrl.pathname === '/api/profile/avatar') {
+        await handleUploadAvatarApi(req, res);
+        return;
+    }
+
     if (requestUrl.pathname === '/api/ratings') {
         await handlePutRatingApi(req, res);
         return;
@@ -869,6 +1100,12 @@ const server = http.createServer(async (req, res) => {
     if (requestUrl.pathname.startsWith('/api/ratings/')) {
         const itemId = decodeURIComponent(requestUrl.pathname.slice('/api/ratings/'.length));
         await handleDeleteRatingApi(req, res, itemId);
+        return;
+    }
+
+    if (requestUrl.pathname.startsWith('/api/users/')) {
+        const userId = decodeURIComponent(requestUrl.pathname.slice('/api/users/'.length));
+        await handleGetPublicUserProfileApi(req, res, userId);
         return;
     }
 

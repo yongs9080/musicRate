@@ -10,6 +10,7 @@
     "nodemon": "^3.1.14"
   },
   "dependencies": {
+    "cloudinary": "^2.10.0",
     "cors": "^2.8.6"
   }
 }

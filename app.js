@@ -7,7 +7,9 @@ import {
     fetchMyRatings,
     fetchRatingsByItemIds,
     logoutCurrentUser,
-    saveRating
+    saveCurrentUserProfile,
+    saveRating,
+    uploadProfileAvatar
 } from './ratings-api.js';
 import { searchSpotifyMedia, searchSpotifyMediaPage } from './spotify-api.js';
 
@@ -28,6 +30,7 @@ const SEARCH_PAGE_SIZE = 10;
 const DETAIL_HASH_PREFIX = 'detail/';
 const MY_RATINGS_PAGE_SIZE = 20;
 const MY_PAGE_RECENT_COUNT = 3;
+const MAX_PROFILE_IMAGE_FILE_SIZE = 5 * 1024 * 1024;
 let searchDebounceTimer = null;
 let latestSearchRequestId = 0;
 let currentSearchFilter = 'all';
@@ -44,6 +47,39 @@ let currentDetailSourcePageKey = 'home';
 let myRatingsByItemId = Object.create(null);
 let currentUser = null;
 let currentAuthMessage = '';
+
+function getMyPageProfileSection() {
+    return pages.mypage?.find((section) => section?.type === 'profile') || null;
+}
+
+function getMyPageRecentSection() {
+    return pages.mypage?.find((section) => section?.type === 'list' && section?.title === '최근 평가한 곡') || null;
+}
+
+function getProfileEditSection() {
+    return pages.profileEdit?.find((section) => section?.type === 'profile-editor') || null;
+}
+
+function getCurrentUserProfileView() {
+    if (!isAuthenticated()) {
+        return {
+            displayName: '게스트',
+            subtitle: 'Google 로그인 후 내 평점과 프로필을 확인할 수 있습니다.',
+            avatarUrl: createAvatarImage('G')
+        };
+    }
+
+    const fallbackDisplayName = currentUser.displayName || currentUser.email || 'Music Rate User';
+    const displayName = fallbackDisplayName.trim() || 'Music Rate User';
+    const subtitle = currentUser.email || 'Google 계정으로 로그인됨';
+    const avatarUrl = (currentUser.avatarUrl || '').trim() || createAvatarImage(displayName);
+
+    return {
+        displayName,
+        subtitle,
+        avatarUrl
+    };
+}
 
 function isAuthenticated() {
     return Boolean(currentUser?.id);
@@ -68,10 +104,13 @@ function updateAuthControls() {
     }
 
     if (isAuthenticated()) {
+        const profileView = getCurrentUserProfileView();
         authLoginButton.classList.add('hidden');
         authLogoutButton.classList.remove('hidden');
         authUserLabel.classList.remove('hidden');
-        authUserLabel.textContent = currentUser.displayName || currentUser.email || '로그인됨';
+        authUserLabel.textContent = profileView.displayName;
+        authUserLabel.setAttribute('role', 'button');
+        authUserLabel.setAttribute('tabindex', '0');
         return;
     }
 
@@ -79,6 +118,8 @@ function updateAuthControls() {
     authLogoutButton.classList.add('hidden');
     authUserLabel.classList.add('hidden');
     authUserLabel.textContent = '';
+    authUserLabel.removeAttribute('role');
+    authUserLabel.removeAttribute('tabindex');
 }
 
 function consumeAuthMessageFromUrl() {
@@ -175,27 +216,27 @@ function mapRatingRecordToMediaItem(record) {
 }
 
 function updateMyPageProfile() {
-    const profileSection = pages.mypage?.[0];
+    const profileSection = getMyPageProfileSection();
     if (!profileSection) {
         return;
     }
 
-    if (!isAuthenticated()) {
-        profileSection.name = '게스트';
-        profileSection.subtitle = 'Google 로그인 후 내 평점과 프로필을 확인할 수 있습니다.';
-        profileSection.image = createAvatarImage('G');
-        return;
-    }
+    const profileView = getCurrentUserProfileView();
+    profileSection.name = profileView.displayName;
+    profileSection.subtitle = profileView.subtitle;
+    profileSection.image = profileView.avatarUrl;
 
-    const displayName = currentUser.displayName || currentUser.email || 'Music Rate User';
-    profileSection.name = displayName;
-    profileSection.subtitle = currentUser.email || 'Google 계정으로 로그인됨';
-    profileSection.image = currentUser.avatarUrl || createAvatarImage(displayName);
+    const profileEditorSection = getProfileEditSection();
+    if (profileEditorSection) {
+        profileEditorSection.nameValue = profileView.displayName;
+        profileEditorSection.imageValue = profileView.avatarUrl;
+        profileEditorSection.imagePreview = profileView.avatarUrl;
+    }
 }
 
 function updateMyRatingsPageSections(items, total) {
     const myRatedMusicSection = pages.myRatedMusic?.[0];
-    const myPageRecentSection = pages.mypage?.[2];
+    const myPageRecentSection = getMyPageRecentSection();
 
     if (!isAuthenticated()) {
         if (myRatedMusicSection) {
@@ -232,8 +273,116 @@ function setMyRatingsLoadingState() {
         pages.myRatedMusic[0].description = '저장된 평점을 불러오는 중입니다.';
     }
 
-    if (pages.mypage?.[2]) {
-        pages.mypage[2].description = '저장된 최근 평점을 불러오는 중입니다.';
+    const myPageRecentSection = getMyPageRecentSection();
+    if (myPageRecentSection) {
+        myPageRecentSection.description = '저장된 최근 평점을 불러오는 중입니다.';
+    }
+}
+
+function isValidProfileImageUrl(urlText) {
+    const normalizedUrl = (urlText || '').trim();
+    if (!normalizedUrl) {
+        return true;
+    }
+
+    if (normalizedUrl.startsWith('data:image/')) {
+        return true;
+    }
+
+    try {
+        const parsedUrl = new URL(normalizedUrl);
+        return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+function updateProfilePreviewImage(previewUrl, fallbackName = 'U') {
+    const previewElement = contentDisplay.querySelector('[data-profile-image-preview]');
+    if (!previewElement) {
+        return;
+    }
+
+    previewElement.src = (previewUrl || '').trim() || createAvatarImage(fallbackName);
+}
+
+async function saveProfileEditor() {
+    if (!isAuthenticated()) {
+        window.alert('Google 로그인 후 프로필을 수정할 수 있습니다.');
+        return;
+    }
+
+    const nameInput = contentDisplay.querySelector('[data-profile-name-input]');
+    const imageInput = contentDisplay.querySelector('[data-profile-image-input]');
+    if (!nameInput || !imageInput) {
+        return;
+    }
+
+    const nameValue = nameInput.value.trim();
+    const imageValue = imageInput.value.trim();
+
+    if (!nameValue) {
+        window.alert('이름을 입력해주세요.');
+        nameInput.focus();
+        return;
+    }
+
+    if (nameValue.length > 40) {
+        window.alert('이름은 40자 이하로 입력해주세요.');
+        nameInput.focus();
+        return;
+    }
+
+    if (!isValidProfileImageUrl(imageValue)) {
+        navigateToPage('mypage', { pushHistory: true });
+        return;
+    }
+
+    try {
+        const savedUser = await saveCurrentUserProfile({
+            displayName: nameValue,
+            avatarUrl: imageValue
+        });
+        currentUser = savedUser;
+        updateMyPageProfile();
+        updateAuthControls();
+        navigateToPage('mypage', { pushHistory: true });
+    } catch (error) {
+        console.error(error);
+        window.alert(error instanceof Error ? error.message : '프로필 저장 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleProfileImageFileChange(fileInput) {
+    const file = fileInput?.files?.[0];
+    if (!file) {
+        return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+        window.alert('이미지 파일만 업로드할 수 있습니다.');
+        fileInput.value = '';
+        return;
+    }
+
+    if (file.size > MAX_PROFILE_IMAGE_FILE_SIZE) {
+        window.alert('프로필 이미지는 5MB 이하만 업로드할 수 있습니다.');
+        fileInput.value = '';
+        return;
+    }
+
+    try {
+        const { avatarUrl } = await uploadProfileAvatar(file);
+        const imageInput = contentDisplay.querySelector('[data-profile-image-input]');
+        if (imageInput) {
+            imageInput.value = avatarUrl;
+        }
+
+        const nameInput = contentDisplay.querySelector('[data-profile-name-input]');
+        updateProfilePreviewImage(avatarUrl, nameInput?.value?.trim() || 'U');
+    } catch (error) {
+        console.error(error);
+        window.alert(error instanceof Error ? error.message : '이미지 업로드 중 오류가 발생했습니다.');
     }
 }
 
@@ -244,7 +393,7 @@ async function refreshMyRatingsPageData(options = {}) {
         updateMyPageProfile();
         updateMyRatingsPageSections([], 0);
         resetLocalRatingState();
-        if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic')) {
+        if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic' || currentPageKey === 'profileEdit')) {
             rerenderCurrentView();
         }
         return;
@@ -252,7 +401,7 @@ async function refreshMyRatingsPageData(options = {}) {
 
     if (showLoading) {
         setMyRatingsLoadingState();
-        if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic')) {
+        if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic' || currentPageKey === 'profileEdit')) {
             rerenderCurrentView();
         }
     }
@@ -272,7 +421,7 @@ async function refreshMyRatingsPageData(options = {}) {
         updateMyRatingsPageSections(items, Number(data?.total) || 0);
         syncMyRatingsAcrossSources();
 
-        if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic')) {
+        if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic' || currentPageKey === 'profileEdit')) {
             rerenderCurrentView();
         }
     } catch (error) {
@@ -282,11 +431,12 @@ async function refreshMyRatingsPageData(options = {}) {
             pages.myRatedMusic[0].description = '평점 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
         }
 
-        if (pages.mypage?.[2]) {
-            pages.mypage[2].description = '최근 평점을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
+        const myPageRecentSection = getMyPageRecentSection();
+        if (myPageRecentSection) {
+            myPageRecentSection.description = '최근 평점을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
         }
 
-        if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic')) {
+        if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic' || currentPageKey === 'profileEdit')) {
             rerenderCurrentView();
         }
     }
@@ -985,6 +1135,12 @@ function navigateToPage(pageKey, options = {}) {
     const { pushHistory = true, focusSearch = false } = options;
     const resolvedPageKey = getValidPageKey(pageKey);
 
+    if (resolvedPageKey === 'profileEdit' && !isAuthenticated()) {
+        window.alert('Google 로그인 후 프로필을 수정할 수 있습니다.');
+        beginGoogleLogin();
+        return;
+    }
+
     if (pushHistory && resolvedPageKey === currentPageKey) {
         setSearchPageState(resolvedPageKey, focusSearch);
         return;
@@ -993,7 +1149,7 @@ function navigateToPage(pageKey, options = {}) {
     setSearchPageState(resolvedPageKey, focusSearch);
     renderPage(resolvedPageKey);
 
-    if (resolvedPageKey === 'mypage' || resolvedPageKey === 'myRatedMusic') {
+    if (resolvedPageKey === 'mypage' || resolvedPageKey === 'myRatedMusic' || resolvedPageKey === 'profileEdit') {
         refreshMyRatingsPageData({ rerenderIfVisible: true, showLoading: true });
     }
 
@@ -1090,6 +1246,16 @@ contentDisplay.addEventListener('click', (event) => {
         return;
     }
 
+    const actionButton = event.target.closest('[data-action]');
+    if (actionButton) {
+        const actionKey = actionButton.dataset.action;
+
+        if (actionKey === 'save-profile-editor') {
+            saveProfileEditor();
+        }
+        return;
+    }
+
     const loadMoreButton = event.target.closest('[data-search-load-more]');
     if (loadMoreButton) {
         loadMoreSearchResults();
@@ -1130,12 +1296,26 @@ contentDisplay.addEventListener('click', (event) => {
 });
 
 contentDisplay.addEventListener('change', (event) => {
+    const profileImageFileInput = event.target.closest('[data-profile-image-file]');
+    if (profileImageFileInput) {
+        handleProfileImageFileChange(profileImageFileInput);
+        return;
+    }
+
     const ratingSelect = event.target.closest('[data-rating-select]');
     if (!ratingSelect) {
         return;
     }
 
     submitRatingChange(ratingSelect.dataset.itemId, ratingSelect.value);
+});
+
+contentDisplay.addEventListener('input', (event) => {
+    const profileNameInput = event.target.closest('[data-profile-name-input]');
+    if (profileNameInput) {
+        const imageInput = contentDisplay.querySelector('[data-profile-image-input]');
+        updateProfilePreviewImage(imageInput?.value || '', profileNameInput.value.trim() || 'U');
+    }
 });
 
 contentDisplay.addEventListener('keydown', (event) => {
@@ -1192,6 +1372,25 @@ if (authLogoutButton) {
             console.error(error);
             window.alert(error instanceof Error ? error.message : '로그아웃 중 오류가 발생했습니다.');
         }
+    });
+}
+
+if (authUserLabel) {
+    authUserLabel.addEventListener('click', () => {
+        if (!isAuthenticated()) {
+            return;
+        }
+
+        navigateToPage('mypage', { pushHistory: true });
+    });
+
+    authUserLabel.addEventListener('keydown', (event) => {
+        if ((event.key !== 'Enter' && event.key !== ' ') || !isAuthenticated()) {
+            return;
+        }
+
+        event.preventDefault();
+        navigateToPage('mypage', { pushHistory: true });
     });
 }
 

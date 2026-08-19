@@ -42,6 +42,38 @@ export function fetchCurrentUser() {
     return requestJson('/api/me');
 }
 
+export function saveCurrentUserProfile(payload) {
+    return requestJson('/api/profile', {
+        method: 'PUT',
+        body: payload
+    });
+}
+
+export async function uploadProfileAvatar(file) {
+    const form = new FormData();
+    form.append('file', file, file.name);
+
+    const response = await fetch(`${getApiBaseUrl()}/api/profile/avatar`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: form
+    });
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+        const message = payload?.error?.message || `Upload failed: ${response.status}`;
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+    }
+
+    return payload.data;
+}
+
+export function fetchUserProfile(userId) {
+    return requestJson(`/api/users/${encodeURIComponent(userId)}`);
+}
+
 export function beginGoogleLogin() {
     if (typeof window === 'undefined') {
         return;

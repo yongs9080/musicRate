@@ -111,6 +111,17 @@ nav.top-nav {
     font-weight: 700;
 }
 
+.auth-user-label[role="button"] {
+    cursor: pointer;
+}
+
+.auth-user-label[role="button"]:hover,
+.auth-user-label[role="button"]:focus-visible {
+    color: #1d4ed8;
+    text-decoration: underline;
+    outline: none;
+}
+
 .auth-button {
     border: 1px solid #d1d5db;
     background: #ffffff;
@@ -320,6 +331,81 @@ main {
 .profile-meta p {
     margin: 4px 0 0;
     color: #4b5563;
+}
+
+.profile-editor-card {
+    margin-bottom: 28px;
+}
+
+.profile-editor-form {
+    display: grid;
+    gap: 12px;
+    max-width: 520px;
+}
+
+.profile-editor-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.profile-editor-field span {
+    color: #374151;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.profile-editor-input,
+.profile-editor-file-input {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #111827;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+}
+
+.profile-editor-input:focus-visible,
+.profile-editor-file-input:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+}
+
+.profile-editor-preview-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.profile-editor-preview {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid #dbeafe;
+    background: #eff6ff;
+}
+
+.profile-editor-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.profile-editor-save,
+.profile-editor-cancel {
+    width: auto;
+    min-width: 120px;
+}
+
+.profile-editor-cancel {
+    background: #4b5563;
+}
+
+.profile-editor-cancel:hover,
+.profile-editor-cancel:focus-visible {
+    background: #374151;
 }
 
 .content-card p,

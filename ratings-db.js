@@ -415,6 +415,27 @@ export function findUserById(userId) {
     return mapUserRow(findUserByIdStatement.get(userId));
 }
 
+export function updateUserProfile({ userId, displayName = null, avatarUrl = null }) {
+    ensureUser(userId);
+
+    const normalizedDisplayName = typeof displayName === 'string'
+        ? displayName.trim() || null
+        : null;
+    const normalizedAvatarUrl = typeof avatarUrl === 'string'
+        ? avatarUrl.trim() || null
+        : null;
+
+    updateUserProfileStatement.run(
+        null,
+        normalizedDisplayName,
+        normalizedAvatarUrl,
+        normalizedDisplayName,
+        userId
+    );
+
+    return findUserById(userId);
+}
+
 export function upsertUserFromAuthAccount({
     provider,
     providerUserId,
@@ -435,6 +456,7 @@ export function upsertUserFromAuthAccount({
     return runInTransaction(() => {
         const existingProviderUser = mapUserRow(findUserByAuthAccountStatement.get(normalizedProvider, normalizedProviderUserId));
         const existingEmailUser = normalizedEmail ? mapUserRow(findUserByEmailStatement.get(normalizedEmail)) : null;
+        const existingUser = existingProviderUser || existingEmailUser;
         const resolvedUserId = existingProviderUser?.id || existingEmailUser?.id || randomUUID();
 
         if (!existingProviderUser && !existingEmailUser) {
@@ -446,11 +468,16 @@ export function upsertUserFromAuthAccount({
                 normalizedDisplayName
             );
         } else {
+            const shouldKeepDisplayName = Boolean(existingUser?.displayName?.trim());
+            const shouldKeepAvatarUrl = Boolean(existingUser?.avatarUrl?.trim());
+            const nextDisplayName = shouldKeepDisplayName ? null : normalizedDisplayName;
+            const nextAvatarUrl = shouldKeepAvatarUrl ? null : normalizedAvatarUrl;
+
             updateUserProfileStatement.run(
                 normalizedEmail,
-                normalizedDisplayName,
-                normalizedAvatarUrl,
-                normalizedDisplayName,
+                nextDisplayName,
+                nextAvatarUrl,
+                nextDisplayName,
                 resolvedUserId
             );
         }

@@ -87,11 +87,22 @@ function createProfileSectionData({ name, subtitle, image }) {
     };
 }
 
-function createActionSectionData({ label, targetPage }) {
+function createActionSectionData({ label, targetPage, actionKey }) {
     return {
         type: 'action',
         label,
-        targetPage
+        targetPage,
+        actionKey: actionKey || ''
+    };
+}
+
+function createProfileEditorSectionData({ cancelRoute = 'mypage' } = {}) {
+    return {
+        type: 'profile-editor',
+        nameValue: '',
+        imageValue: '',
+        imagePreview: createAvatarImage('U'),
+        cancelRoute
     };
 }
 
@@ -169,6 +180,10 @@ export const pages = {
             image: createAvatarImage('D')
         }),
         createActionSectionData({
+            label: '프로필 수정',
+            targetPage: 'profileEdit'
+        }),
+        createActionSectionData({
             label: '내가 평가한 음악',
             targetPage: 'myRatedMusic'
         }),
@@ -177,9 +192,15 @@ export const pages = {
             description: '저장된 최근 평점을 불러오는 중입니다.',
             items: []
         })
+    ],
+    profileEdit: [
+        createProfileEditorSectionData({
+            cancelRoute: 'mypage'
+        })
     ]
 };
 
 export const pageActiveTabMap = {
-    myRatedMusic: 'mypage'
+    myRatedMusic: 'mypage',
+    profileEdit: 'mypage'
 };

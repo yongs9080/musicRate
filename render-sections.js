@@ -84,9 +84,57 @@ function createProfileSection(section) {
 }
 
 function createActionSection(section) {
+    const actionAttribute = section.actionKey
+        ? `data-action="${section.actionKey}"`
+        : `data-route="${section.targetPage}"`;
+
     return `
         <section class="content-card action-card">
-            <button class="action mypage-action-link" type="button" data-route="${section.targetPage}">${section.label}</button>
+            <button class="action mypage-action-link" type="button" ${actionAttribute}>${section.label}</button>
+        </section>
+    `;
+}
+
+function createProfileEditorSection(section) {
+    const nameValue = section.nameValue || '';
+    const imageValue = section.imageValue || '';
+    const imagePreview = section.imagePreview || createCoverImage('PF');
+    const cancelRoute = section.cancelRoute || 'mypage';
+
+    return `
+        <section class="content-card profile-editor-card">
+            <h2>프로필 수정</h2>
+            <p>이름과 프로필 사진을 변경할 수 있습니다.</p>
+            <div class="profile-editor-form" data-profile-editor-form>
+                <input type="hidden" value="${imageValue}" data-profile-image-input />
+                <label class="profile-editor-field">
+                    <span>이름</span>
+                    <input
+                        class="profile-editor-input"
+                        type="text"
+                        maxlength="40"
+                        placeholder="표시할 이름"
+                        value="${nameValue}"
+                        data-profile-name-input
+                    />
+                </label>
+                <label class="profile-editor-field">
+                    <span>이미지 업로드</span>
+                    <input
+                        class="profile-editor-file-input"
+                        type="file"
+                        accept="image/*"
+                        data-profile-image-file
+                    />
+                </label>
+                <div class="profile-editor-preview-wrap">
+                    <img class="profile-editor-preview" src="${imagePreview}" alt="프로필 미리보기" data-profile-image-preview />
+                </div>
+                <div class="profile-editor-actions">
+                    <button class="action profile-editor-save" type="button" data-action="save-profile-editor">저장</button>
+                    <button class="action profile-editor-cancel" type="button" data-route="${cancelRoute}">취소</button>
+                </div>
+            </div>
         </section>
     `;
 }
@@ -117,6 +165,10 @@ export function renderSections(sectionsData) {
 
         if (section.type === 'search-filter') {
             return createSearchFilterSection(section);
+        }
+
+        if (section.type === 'profile-editor') {
+            return createProfileEditorSection(section);
         }
 
         return createListSection(section);
