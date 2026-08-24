@@ -118,6 +118,24 @@ function createSearchFilterSectionData() {
     };
 }
 
+function createFeaturedMusicSectionData() {
+    return {
+        type: 'featured-music',
+        title: '대표 음악',
+        description: '최대 3개의 앨범/곡을 선택할 수 있습니다.',
+        items: []
+    };
+}
+
+function createMyCommentsSectionData() {
+    return {
+        type: 'comment-feed',
+        title: '내 코멘트',
+        description: '작성한 코멘트를 확인할 수 있습니다.',
+        items: []
+    };
+}
+
 export const pages = {
     home: [
         createHorizontalMediaSection({
@@ -187,6 +205,8 @@ export const pages = {
             label: '내가 평가한 음악',
             targetPage: 'myRatedMusic'
         }),
+        createFeaturedMusicSectionData(),
+        createMyCommentsSectionData(),
         createHorizontalMediaSection({
             title: '최근 평가한 곡',
             description: '저장된 최근 평점을 불러오는 중입니다.',

@@ -116,3 +116,49 @@ export function deleteRatingByItemId(itemId) {
         method: 'DELETE'
     });
 }
+
+export function createComment(payload) {
+    return requestJson('/api/comments', {
+        method: 'POST',
+        body: payload
+    });
+}
+
+export function fetchCommentsByItem({ itemId, itemType = 'album', limit = 20, offset = 0 } = {}) {
+    const query = new URLSearchParams({
+        itemId,
+        itemType,
+        limit: String(limit),
+        offset: String(offset)
+    });
+
+    return requestJson(`/api/comments?${query.toString()}`);
+}
+
+export function fetchMyComments({ limit = 20, offset = 0 } = {}) {
+    const query = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset)
+    });
+
+    return requestJson(`/api/comments/me?${query.toString()}`);
+}
+
+export function deleteComment(commentId) {
+    return requestJson(`/api/comments/${encodeURIComponent(commentId)}`, {
+        method: 'DELETE'
+    });
+}
+
+export function updateComment(commentId, payload) {
+    return requestJson(`/api/comments/${encodeURIComponent(commentId)}`, {
+        method: 'PUT',
+        body: payload
+    });
+}
+
+export function toggleCommentLike(commentId) {
+    return requestJson(`/api/comments/${encodeURIComponent(commentId)}/like`, {
+        method: 'POST'
+    });
+}

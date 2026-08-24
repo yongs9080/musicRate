@@ -153,6 +153,101 @@ function createSearchFilterSection(section) {
     `;
 }
 
+function createFeaturedMusicSection(section) {
+    const maxItems = 3;
+    const selectedItems = Array.isArray(section.items) ? section.items.slice(0, maxItems) : [];
+    const pickerItems = Array.isArray(section.pickerItems) ? section.pickerItems : [];
+    const isPickerOpen = Boolean(section.pickerOpen);
+    const pickerSlotIndex = Number.isInteger(section.pickerSlotIndex) ? section.pickerSlotIndex : null;
+
+    const slotsMarkup = Array.from({ length: maxItems }, (_, slotIndex) => {
+        const item = selectedItems[slotIndex];
+        if (item) {
+            return `
+                <li class="featured-slot-item" role="group" aria-label="대표 음악 ${slotIndex + 1}">
+                    <img class="featured-slot-cover" src="${item.image || createCoverImage(item.title || 'FM')}" alt="${item.title || '대표 음악'}" />
+                    <div class="featured-slot-meta">
+                        <strong>${item.title || 'Untitled'}</strong>
+                        <span>${item.artist || 'Unknown'}</span>
+                        <span>${item.typeLabel || (item.itemType === 'album' ? '앨범' : '곡')}</span>
+                    </div>
+                    <button class="featured-slot-remove" type="button" data-action="remove-featured-item" data-slot-index="${slotIndex}">삭제</button>
+                </li>
+            `;
+        }
+
+        return `
+            <li class="featured-slot-item featured-slot-empty" role="group" aria-label="대표 음악 빈 슬롯 ${slotIndex + 1}">
+                <button class="featured-slot-add" type="button" data-action="open-featured-picker" data-slot-index="${slotIndex}">+</button>
+            </li>
+        `;
+    }).join('');
+
+    const pickerMarkup = isPickerOpen ? `
+        <div class="featured-picker" data-featured-picker>
+            <div class="featured-picker-header">
+                <strong>대표 음악 선택${pickerSlotIndex !== null ? ` (${pickerSlotIndex + 1}/3)` : ''}</strong>
+                <button class="featured-picker-close" type="button" data-action="close-featured-picker">닫기</button>
+            </div>
+            <ul class="featured-picker-list">
+                ${pickerItems.length ? pickerItems.map((item) => `
+                    <li class="featured-picker-item">
+                        <img class="featured-picker-cover" src="${item.image || createCoverImage(item.title || 'FM')}" alt="${item.title || '음악'}" />
+                        <div class="featured-picker-meta">
+                            <strong>${item.title || 'Untitled'}</strong>
+                            <span>${item.artist || 'Unknown'}</span>
+                            <span>${item.typeLabel || (item.itemType === 'album' ? '앨범' : '곡')}</span>
+                        </div>
+                        <button class="action featured-picker-select" type="button" data-action="select-featured-item" data-item-id="${item.id || ''}">선택</button>
+                    </li>
+                `).join('') : '<li class="featured-picker-empty">평가한 음악이 없어 선택할 수 없습니다.</li>'}
+            </ul>
+        </div>
+    ` : '';
+
+    return `
+        <section class="content-card featured-music-card">
+            <h2>${section.title || '대표 음악'}</h2>
+            <p>${section.description || '최대 3개의 앨범/곡을 선택할 수 있습니다.'}</p>
+            <ul class="featured-slots">${slotsMarkup}</ul>
+            ${pickerMarkup}
+        </section>
+    `;
+}
+
+function createCommentFeedSection(section) {
+    const items = Array.isArray(section.items) ? section.items : [];
+    const itemsMarkup = items.length
+        ? items.map((item) => `
+            <li class="comment-feed-item content-card-item" data-item-id="${item?.itemId || item?.id || ''}">
+                <div class="comment-feed-item-header">
+                    <div class="comment-feed-cover-wrap">
+                        <img class="comment-feed-cover" src="${item?.image || createCoverImage(item?.title || 'CM')}" alt="${item?.title || '코멘트'}" />
+                    </div>
+                    <div class="comment-feed-meta">
+                        <strong>${item?.title || 'Untitled'}</strong>
+                        <span>${item?.artist || 'Unknown'}</span>
+                        <span>${item?.typeLabel || '곡'}</span>
+                    </div>
+                </div>
+                <p class="comment-feed-content">${item?.content || ''}</p>
+                <div class="comment-feed-footer">
+                    <span class="comment-feed-like">♥ ${Number(item?.likeCount || 0)}</span>
+                    <time class="comment-feed-date">${item?.createdAt ? new Date(item.createdAt).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '방금 전'}</time>
+                </div>
+            </li>
+        `).join('')
+        : '<li class="comment-feed-empty">작성한 코멘트가 아직 없습니다.</li>';
+
+    return `
+        <section class="content-card comment-feed-card">
+            <h2>${section.title || '내 코멘트'}</h2>
+            <p>${section.description || '작성한 코멘트를 확인할 수 있습니다.'}</p>
+            <ul class="comment-feed-list horizontal-list">${itemsMarkup}</ul>
+        </section>
+    `;
+}
+
 export function renderSections(sectionsData) {
     return sectionsData.map((section) => {
         if (section.type === 'profile') {
@@ -169,6 +264,14 @@ export function renderSections(sectionsData) {
 
         if (section.type === 'profile-editor') {
             return createProfileEditorSection(section);
+        }
+
+        if (section.type === 'featured-music') {
+            return createFeaturedMusicSection(section);
+        }
+
+        if (section.type === 'comment-feed') {
+            return createCommentFeedSection(section);
         }
 
         return createListSection(section);

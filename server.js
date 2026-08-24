@@ -6,13 +6,19 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+    createMusicComment,
     createSessionForUser,
+    deleteMusicComment,
     deleteRating,
     deleteSession,
     findUserById,
     findUserBySessionId,
     getRatingsByItemIds,
+    listMusicCommentsByItem,
+    listMusicCommentsByUser,
     listRatingsByUser,
+    toggleCommentLike,
+    updateMusicComment,
     updateUserProfile,
     upsertUserFromAuthAccount,
     upsertRating
@@ -72,6 +78,7 @@ const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_SEARCH_URL = 'https://api.spotify.com/v1/search';
 const SPOTIFY_ALBUMS_URL = 'https://api.spotify.com/v1/albums';
 const MAX_PROFILE_NAME_LENGTH = 40;
+const MAX_FEATURED_MUSIC_COUNT = 3;
 const MAX_PROFILE_AVATAR_BYTES = 5 * 1024 * 1024;
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || '';
 const CLOUDINARY_UPLOAD_PRESET = process.env.CLOUDINARY_UPLOAD_PRESET || '';
@@ -275,6 +282,10 @@ function validateItemType(value) {
     return value === 'song' || value === 'album';
 }
 
+function validateCommentVisibility(value) {
+    return value === 'public' || value === 'private';
+}
+
 function validateProfileDisplayName(value) {
     return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_PROFILE_NAME_LENGTH;
 }
@@ -299,6 +310,56 @@ function validateProfileAvatarUrl(value) {
     } catch {
         return false;
     }
+}
+
+function normalizeFeaturedMusic(items) {
+    if (!Array.isArray(items)) {
+        return [];
+    }
+
+    const normalizedItems = [];
+    const usedItemIds = new Set();
+
+    items.forEach((item) => {
+        if (!item || typeof item !== 'object' || normalizedItems.length >= MAX_FEATURED_MUSIC_COUNT) {
+            return;
+        }
+
+        const itemId = (item.itemId || '').toString().trim();
+        const itemType = (item.itemType || '').toString().trim();
+        const title = (item.title || '').toString().trim();
+        const artist = item.artist == null ? '' : item.artist.toString().trim();
+        const image = item.image == null ? '' : item.image.toString().trim();
+        const year = item.year == null ? '' : item.year.toString().trim();
+
+        if (!itemId || usedItemIds.has(itemId)) {
+            return;
+        }
+
+        if (itemType !== 'song' && itemType !== 'album') {
+            return;
+        }
+
+        if (!title || title.length > 140 || artist.length > 140 || year.length > 20) {
+            return;
+        }
+
+        if (image && !validateProfileAvatarUrl(image) && !image.startsWith('data:image/')) {
+            return;
+        }
+
+        normalizedItems.push({
+            itemId,
+            itemType,
+            title,
+            artist,
+            image,
+            year
+        });
+        usedItemIds.add(itemId);
+    });
+
+    return normalizedItems;
 }
 
 async function readMultipartFile(req) {
@@ -774,6 +835,9 @@ async function handleUpdateMyProfileApi(req, res) {
 
     const displayName = (body?.displayName || '').toString();
     const avatarUrl = body?.avatarUrl == null ? '' : body.avatarUrl.toString();
+    const featuredMusic = typeof body?.featuredMusic === 'undefined'
+        ? null
+        : normalizeFeaturedMusic(body?.featuredMusic);
 
     if (!validateProfileDisplayName(displayName)) {
         sendError(res, 400, 'INVALID_DISPLAY_NAME', 'displayName must be between 1 and 40 characters.');
@@ -789,7 +853,8 @@ async function handleUpdateMyProfileApi(req, res) {
         const updatedUser = updateUserProfile({
             userId: user.id,
             displayName,
-            avatarUrl
+            avatarUrl,
+            featuredMusic
         });
         sendOk(res, 200, updatedUser);
     } catch (error) {
@@ -871,12 +936,226 @@ async function handleGetPublicUserProfileApi(req, res, userId) {
             id: user.id,
             displayName: user.displayName,
             avatarUrl: user.avatarUrl,
+            featuredMusic: Array.isArray(user.featuredMusic) ? user.featuredMusic : [],
             bio: user.bio,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt
         });
     } catch (error) {
         sendError(res, 500, 'GET_USER_FAILED', error instanceof Error ? error.message : '사용자 조회 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleCreateCommentApi(req, res) {
+    if (req.method !== 'POST') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    const user = requireAuthenticatedUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    let body;
+    try {
+        body = await readJsonBody(req);
+    } catch {
+        sendError(res, 400, 'INVALID_JSON', 'request body must be valid JSON');
+        return;
+    }
+
+    const itemId = (body?.itemId || '').toString().trim();
+    const itemType = (body?.itemType || '').toString().trim();
+    const title = (body?.title || '').toString().trim();
+    const artist = body?.artist == null ? null : body.artist.toString().trim() || null;
+    const image = body?.image == null ? null : body.image.toString().trim() || null;
+    const year = body?.year == null ? null : body.year.toString().trim() || null;
+    const content = (body?.content || '').toString();
+    const visibility = ((body?.visibility || 'public').toString().trim().toLowerCase() || 'public');
+
+    if (!itemId) {
+        sendError(res, 400, 'INVALID_ITEM_ID', 'itemId is required');
+        return;
+    }
+
+    if (!validateItemType(itemType)) {
+        sendError(res, 400, 'INVALID_ITEM_TYPE', 'itemType must be song or album');
+        return;
+    }
+
+    if (!title) {
+        sendError(res, 400, 'INVALID_TITLE', 'title is required');
+        return;
+    }
+
+    if (!content.trim() || content.length > 2000) {
+        sendError(res, 400, 'INVALID_CONTENT', 'content must be between 1 and 2000 characters');
+        return;
+    }
+
+    if (!validateCommentVisibility(visibility)) {
+        sendError(res, 400, 'INVALID_VISIBILITY', 'visibility must be public or private');
+        return;
+    }
+
+    try {
+        const comment = createMusicComment({
+            userId: user.id,
+            itemId,
+            itemType,
+            title,
+            artist,
+            image,
+            year,
+            content: content.trim(),
+            visibility
+        });
+        sendOk(res, 200, comment);
+    } catch (error) {
+        if (error instanceof Error && error.message === 'comment already exists for this item') {
+            sendError(res, 409, 'COMMENT_ALREADY_EXISTS', '이 음악/앨범에는 이미 코멘트를 작성했습니다.');
+            return;
+        }
+        sendError(res, 500, 'CREATE_COMMENT_FAILED', error instanceof Error ? error.message : '댓글 저장 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleListCommentsByItemApi(req, res, requestUrl) {
+    if (req.method !== 'GET') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    const itemId = (requestUrl.searchParams.get('itemId') || '').toString().trim();
+    const itemType = (requestUrl.searchParams.get('itemType') || 'album').toString().trim();
+
+    if (!itemId) {
+        sendError(res, 400, 'INVALID_ITEM_ID', 'itemId is required');
+        return;
+    }
+
+    if (!validateItemType(itemType)) {
+        sendError(res, 400, 'INVALID_ITEM_TYPE', 'itemType must be song or album');
+        return;
+    }
+
+    const limitParam = Number(requestUrl.searchParams.get('limit') || '20');
+    const offsetParam = Number(requestUrl.searchParams.get('offset') || '0');
+    const limit = Number.isFinite(limitParam) ? Math.floor(Math.min(Math.max(limitParam, 1), 100)) : 20;
+    const offset = Number.isFinite(offsetParam) ? Math.floor(Math.max(offsetParam, 0)) : 0;
+    const viewerUserId = getAuthenticatedSession(req)?.user?.id || null;
+
+    try {
+        const data = listMusicCommentsByItem({ itemId, itemType, limit, offset, viewerUserId });
+        sendOk(res, 200, data);
+    } catch (error) {
+        sendError(res, 500, 'LIST_COMMENTS_FAILED', error instanceof Error ? error.message : '댓글 목록 조회 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleListMyCommentsApi(req, res, requestUrl) {
+    if (req.method !== 'GET') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    const user = requireAuthenticatedUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    const limitParam = Number(requestUrl.searchParams.get('limit') || '20');
+    const offsetParam = Number(requestUrl.searchParams.get('offset') || '0');
+    const limit = Number.isFinite(limitParam) ? Math.floor(Math.min(Math.max(limitParam, 1), 100)) : 20;
+    const offset = Number.isFinite(offsetParam) ? Math.floor(Math.max(offsetParam, 0)) : 0;
+
+    try {
+        const data = listMusicCommentsByUser({ userId: user.id, limit, offset, viewerUserId: user.id });
+        sendOk(res, 200, data);
+    } catch (error) {
+        sendError(res, 500, 'LIST_MY_COMMENTS_FAILED', error instanceof Error ? error.message : '내 댓글 목록 조회 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleUpdateCommentApi(req, res, commentId) {
+    if (req.method !== 'PUT') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    const user = requireAuthenticatedUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    let body;
+    try {
+        body = await readJsonBody(req);
+    } catch {
+        sendError(res, 400, 'INVALID_JSON', 'request body must be valid JSON');
+        return;
+    }
+
+    const content = (body?.content || '').toString();
+    if (!content.trim() || content.trim().length > 2000) {
+        sendError(res, 400, 'INVALID_CONTENT', 'content must be between 1 and 2000 characters');
+        return;
+    }
+
+    try {
+        const updatedComment = updateMusicComment({ userId: user.id, commentId, content: content.trim() });
+        sendOk(res, 200, updatedComment);
+    } catch (error) {
+        sendError(res, 500, 'UPDATE_COMMENT_FAILED', error instanceof Error ? error.message : '댓글 수정 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleToggleCommentLikeApi(req, res, commentId) {
+    if (req.method !== 'POST') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    const user = requireAuthenticatedUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    if (!commentId) {
+        sendError(res, 400, 'INVALID_COMMENT_ID', 'commentId is required');
+        return;
+    }
+
+    try {
+        const result = toggleCommentLike({ userId: user.id, commentId });
+        sendOk(res, 200, result);
+    } catch (error) {
+        sendError(res, 500, 'TOGGLE_COMMENT_LIKE_FAILED', error instanceof Error ? error.message : '좋아요 처리 중 오류가 발생했습니다.');
+    }
+}
+
+async function handleDeleteCommentApi(req, res, commentId) {
+    if (req.method !== 'DELETE') {
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    const user = requireAuthenticatedUser(req, res);
+    if (!user) {
+        return;
+    }
+
+    if (!commentId) {
+        sendError(res, 400, 'INVALID_COMMENT_ID', 'commentId is required');
+        return;
+    }
+
+    try {
+        const deleted = deleteMusicComment({ userId: user.id, commentId });
+        sendOk(res, 200, { deleted });
+    } catch (error) {
+        sendError(res, 500, 'DELETE_COMMENT_FAILED', error instanceof Error ? error.message : '댓글 삭제 중 오류가 발생했습니다.');
     }
 }
 
@@ -1079,6 +1358,45 @@ const server = http.createServer(async (req, res) => {
 
     if (requestUrl.pathname === '/api/profile/avatar') {
         await handleUploadAvatarApi(req, res);
+        return;
+    }
+
+    if (requestUrl.pathname === '/api/comments') {
+        if (req.method === 'GET') {
+            await handleListCommentsByItemApi(req, res, requestUrl);
+            return;
+        }
+
+        if (req.method === 'POST') {
+            await handleCreateCommentApi(req, res);
+            return;
+        }
+
+        sendError(res, 405, 'METHOD_NOT_ALLOWED', 'Method Not Allowed');
+        return;
+    }
+
+    if (requestUrl.pathname === '/api/comments/me') {
+        await handleListMyCommentsApi(req, res, requestUrl);
+        return;
+    }
+
+    if (requestUrl.pathname.startsWith('/api/comments/')) {
+        const remainingPath = decodeURIComponent(requestUrl.pathname.slice('/api/comments/'.length));
+
+        if (remainingPath.endsWith('/like')) {
+            const commentId = remainingPath.slice(0, -'/like'.length);
+            await handleToggleCommentLikeApi(req, res, commentId);
+            return;
+        }
+
+        const commentId = remainingPath;
+        if (req.method === 'PUT') {
+            await handleUpdateCommentApi(req, res, commentId);
+            return;
+        }
+
+        await handleDeleteCommentApi(req, res, commentId);
         return;
     }
 

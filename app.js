@@ -2,13 +2,19 @@ import { createAvatarImage, createCoverImage, pages, pageActiveTabMap } from './
 import { renderRatingEditor, renderSections } from './render-sections.js';
 import {
     beginGoogleLogin,
+    createComment,
+    deleteComment,
     deleteRatingByItemId,
+    fetchCommentsByItem,
     fetchCurrentUser,
+    fetchMyComments,
     fetchMyRatings,
     fetchRatingsByItemIds,
     logoutCurrentUser,
     saveCurrentUserProfile,
     saveRating,
+    toggleCommentLike,
+    updateComment,
     uploadProfileAvatar
 } from './ratings-api.js';
 import { searchSpotifyMedia, searchSpotifyMediaPage } from './spotify-api.js';
@@ -30,6 +36,8 @@ const SEARCH_PAGE_SIZE = 10;
 const DETAIL_HASH_PREFIX = 'detail/';
 const MY_RATINGS_PAGE_SIZE = 20;
 const MY_PAGE_RECENT_COUNT = 3;
+const FEATURED_MUSIC_MAX_COUNT = 3;
+const FEATURED_PICKER_FETCH_LIMIT = 100;
 const MAX_PROFILE_IMAGE_FILE_SIZE = 5 * 1024 * 1024;
 let searchDebounceTimer = null;
 let latestSearchRequestId = 0;
@@ -47,6 +55,7 @@ let currentDetailSourcePageKey = 'home';
 let myRatingsByItemId = Object.create(null);
 let currentUser = null;
 let currentAuthMessage = '';
+let featuredPickerCandidates = [];
 
 function getMyPageProfileSection() {
     return pages.mypage?.find((section) => section?.type === 'profile') || null;
@@ -54,6 +63,14 @@ function getMyPageProfileSection() {
 
 function getMyPageRecentSection() {
     return pages.mypage?.find((section) => section?.type === 'list' && section?.title === '최근 평가한 곡') || null;
+}
+
+function getMyPageFeaturedSection() {
+    return pages.mypage?.find((section) => section?.type === 'featured-music') || null;
+}
+
+function getMyPageCommentsSection() {
+    return pages.mypage?.find((section) => section?.type === 'comment-feed') || null;
 }
 
 function getProfileEditSection() {
@@ -108,7 +125,7 @@ function updateAuthControls() {
         authLoginButton.classList.add('hidden');
         authLogoutButton.classList.remove('hidden');
         authUserLabel.classList.remove('hidden');
-        authUserLabel.textContent = profileView.displayName;
+        authUserLabel.innerHTML = `<img src="${profileView.avatarUrl}" alt="${profileView.displayName} 프로필" />`;
         authUserLabel.setAttribute('role', 'button');
         authUserLabel.setAttribute('tabindex', '0');
         return;
@@ -117,7 +134,7 @@ function updateAuthControls() {
     authLoginButton.classList.remove('hidden');
     authLogoutButton.classList.add('hidden');
     authUserLabel.classList.add('hidden');
-    authUserLabel.textContent = '';
+    authUserLabel.innerHTML = '';
     authUserLabel.removeAttribute('role');
     authUserLabel.removeAttribute('tabindex');
 }
@@ -215,6 +232,174 @@ function mapRatingRecordToMediaItem(record) {
     };
 }
 
+function normalizeFeaturedMusicItems(items) {
+    if (!Array.isArray(items)) {
+        return [];
+    }
+
+    const uniqueItems = [];
+    const usedItemIds = new Set();
+
+    items.forEach((item) => {
+        if (!item || typeof item !== 'object') {
+            return;
+        }
+
+        const itemId = (item.id || item.itemId || '').toString().trim();
+        if (!itemId || usedItemIds.has(itemId) || uniqueItems.length >= FEATURED_MUSIC_MAX_COUNT) {
+            return;
+        }
+
+        const itemType = item.itemType === 'album' ? 'album' : 'song';
+        const title = (item.title || '').toString().trim() || 'Untitled';
+        const artist = (item.artist || '').toString().trim() || 'Unknown';
+        const year = (item.year || '').toString().trim() || '-';
+        const image = (item.image || '').toString().trim() || createCoverImage(title.slice(0, 2).toUpperCase());
+
+        uniqueItems.push({
+            id: itemId,
+            itemType,
+            typeLabel: itemType === 'album' ? '앨범' : '곡',
+            title,
+            artist,
+            year,
+            image
+        });
+        usedItemIds.add(itemId);
+    });
+
+    return uniqueItems;
+}
+
+function toFeaturedMusicPayload(items) {
+    return normalizeFeaturedMusicItems(items).map((item) => ({
+        itemId: item.id,
+        itemType: item.itemType,
+        title: item.title,
+        artist: item.artist,
+        year: item.year,
+        image: item.image
+    }));
+}
+
+async function persistFeaturedMusic(items) {
+    if (!isAuthenticated()) {
+        window.alert('Google 로그인 후 대표 음악을 설정할 수 있습니다.');
+        return false;
+    }
+
+    const featuredMusic = toFeaturedMusicPayload(items);
+    try {
+        const savedUser = await saveCurrentUserProfile({
+            displayName: (currentUser?.displayName || currentUser?.email || 'Music Rate User').toString().trim() || 'Music Rate User',
+            avatarUrl: (currentUser?.avatarUrl || '').toString().trim(),
+            featuredMusic
+        });
+        currentUser = savedUser;
+        updateMyPageProfile();
+        updateAuthControls();
+        rerenderCurrentView();
+        return true;
+    } catch (error) {
+        console.error(error);
+        window.alert(error instanceof Error ? error.message : '대표 음악 저장 중 오류가 발생했습니다.');
+        return false;
+    }
+}
+
+async function openFeaturedMusicPicker(slotIndexText) {
+    if (!isAuthenticated()) {
+        window.alert('Google 로그인 후 대표 음악을 설정할 수 있습니다.');
+        return;
+    }
+
+    const featuredSection = getMyPageFeaturedSection();
+    if (!featuredSection) {
+        return;
+    }
+
+    const slotIndex = Number(slotIndexText);
+    const resolvedSlotIndex = Number.isInteger(slotIndex) && slotIndex >= 0 && slotIndex < FEATURED_MUSIC_MAX_COUNT
+        ? slotIndex
+        : normalizeFeaturedMusicItems(featuredSection.items).length;
+
+    try {
+        const myRatedSectionItems = Array.isArray(pages.myRatedMusic?.[0]?.items) ? pages.myRatedMusic[0].items : [];
+        let candidateItems = myRatedSectionItems;
+
+        if (!candidateItems.length) {
+            const ratingsData = await fetchMyRatings({ limit: FEATURED_PICKER_FETCH_LIMIT, offset: 0 });
+            candidateItems = Array.isArray(ratingsData?.items) ? ratingsData.items.map(mapRatingRecordToMediaItem) : [];
+        }
+
+        const selectedIds = new Set(normalizeFeaturedMusicItems(featuredSection.items).map((item) => item.id));
+        featuredPickerCandidates = candidateItems.filter((item) => item?.id && !selectedIds.has(item.id));
+        featuredSection.pickerItems = featuredPickerCandidates;
+        featuredSection.pickerOpen = true;
+        featuredSection.pickerSlotIndex = resolvedSlotIndex;
+        rerenderCurrentView();
+    } catch (error) {
+        console.error(error);
+        window.alert(error instanceof Error ? error.message : '대표 음악 후보를 불러오지 못했습니다.');
+    }
+}
+
+function closeFeaturedMusicPicker() {
+    const featuredSection = getMyPageFeaturedSection();
+    if (!featuredSection) {
+        return;
+    }
+
+    featuredSection.pickerOpen = false;
+    featuredSection.pickerSlotIndex = null;
+    featuredSection.pickerItems = [];
+    featuredPickerCandidates = [];
+    rerenderCurrentView();
+}
+
+async function selectFeaturedMusicItem(itemId) {
+    const featuredSection = getMyPageFeaturedSection();
+    if (!featuredSection) {
+        return;
+    }
+
+    const selectedItem = featuredPickerCandidates.find((item) => item?.id === itemId);
+    if (!selectedItem) {
+        return;
+    }
+
+    const currentItems = normalizeFeaturedMusicItems(featuredSection.items);
+    const slotIndex = Number(featuredSection.pickerSlotIndex);
+    const nextItems = [...currentItems];
+
+    if (Number.isInteger(slotIndex) && slotIndex >= 0 && slotIndex < FEATURED_MUSIC_MAX_COUNT) {
+        nextItems[slotIndex] = selectedItem;
+    } else if (nextItems.length < FEATURED_MUSIC_MAX_COUNT) {
+        nextItems.push(selectedItem);
+    }
+
+    if (await persistFeaturedMusic(nextItems)) {
+        closeFeaturedMusicPicker();
+    }
+}
+
+async function removeFeaturedMusicItem(slotIndexText) {
+    const featuredSection = getMyPageFeaturedSection();
+    if (!featuredSection) {
+        return;
+    }
+
+    const slotIndex = Number(slotIndexText);
+    const currentItems = normalizeFeaturedMusicItems(featuredSection.items);
+
+    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= currentItems.length) {
+        return;
+    }
+
+    const nextItems = currentItems.filter((_, index) => index !== slotIndex);
+    await persistFeaturedMusic(nextItems);
+}
+
 function updateMyPageProfile() {
     const profileSection = getMyPageProfileSection();
     if (!profileSection) {
@@ -232,6 +417,31 @@ function updateMyPageProfile() {
         profileEditorSection.imageValue = profileView.avatarUrl;
         profileEditorSection.imagePreview = profileView.avatarUrl;
     }
+
+    const featuredSection = getMyPageFeaturedSection();
+    if (featuredSection) {
+        featuredSection.items = normalizeFeaturedMusicItems(currentUser?.featuredMusic);
+        featuredSection.description = isAuthenticated()
+            ? '최대 3개의 앨범/곡을 대표 음악으로 고를 수 있습니다.'
+            : 'Google 로그인 후 대표 음악을 선택할 수 있습니다.';
+        featuredSection.pickerOpen = Boolean(featuredSection.pickerOpen && isAuthenticated());
+        featuredSection.pickerItems = Array.isArray(featuredSection.pickerItems) ? featuredSection.pickerItems : [];
+    }
+}
+
+function mapCommentRecordToItem(record) {
+    return {
+        id: record.id,
+        itemId: record.itemId || record.item_id,
+        itemType: record.itemType || record.item_type,
+        title: record.title || 'Untitled',
+        artist: record.artist || 'Unknown',
+        year: record.year || '-',
+        image: record.image || createCoverImage((record.title || 'CM').slice(0, 2).toUpperCase()),
+        content: record.content || '',
+        createdAt: record.createdAt || record.created_at,
+        typeLabel: getDisplayTypeLabel(record.itemType || record.item_type || 'song')
+    };
 }
 
 function updateMyRatingsPageSections(items, total) {
@@ -265,6 +475,25 @@ function updateMyRatingsPageSections(items, total) {
         myPageRecentSection.description = recentItems.length
             ? `최근 ${recentItems.length}개의 평가입니다.`
             : '최근 평가가 아직 없습니다.';
+    }
+}
+
+function updateMyCommentsPageSection(items, total) {
+    const myCommentsSection = getMyPageCommentsSection();
+
+    if (!isAuthenticated()) {
+        if (myCommentsSection) {
+            myCommentsSection.items = [];
+            myCommentsSection.description = 'Google 로그인 후 작성한 코멘트를 확인할 수 있습니다.';
+        }
+        return;
+    }
+
+    if (myCommentsSection) {
+        myCommentsSection.items = items;
+        myCommentsSection.description = total
+            ? `총 ${total}개의 코멘트를 작성했습니다.`
+            : '아직 작성한 코멘트가 없습니다.';
     }
 }
 
@@ -341,7 +570,8 @@ async function saveProfileEditor() {
     try {
         const savedUser = await saveCurrentUserProfile({
             displayName: nameValue,
-            avatarUrl: imageValue
+            avatarUrl: imageValue,
+            featuredMusic: toFeaturedMusicPayload(currentUser?.featuredMusic)
         });
         currentUser = savedUser;
         updateMyPageProfile();
@@ -392,6 +622,7 @@ async function refreshMyRatingsPageData(options = {}) {
     if (!isAuthenticated()) {
         updateMyPageProfile();
         updateMyRatingsPageSections([], 0);
+        updateMyCommentsPageSection([], 0);
         resetLocalRatingState();
         if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic' || currentPageKey === 'profileEdit')) {
             rerenderCurrentView();
@@ -407,8 +638,13 @@ async function refreshMyRatingsPageData(options = {}) {
     }
 
     try {
-        const data = await fetchMyRatings({ limit: MY_RATINGS_PAGE_SIZE, offset: 0 });
-        const items = Array.isArray(data?.items) ? data.items.map(mapRatingRecordToMediaItem) : [];
+        const [ratingsData, commentsData] = await Promise.all([
+            fetchMyRatings({ limit: MY_RATINGS_PAGE_SIZE, offset: 0 }),
+            fetchMyComments({ limit: 20, offset: 0 })
+        ]);
+
+        const items = Array.isArray(ratingsData?.items) ? ratingsData.items.map(mapRatingRecordToMediaItem) : [];
+        const myCommentItems = Array.isArray(commentsData?.items) ? commentsData.items.map(mapCommentRecordToItem) : [];
 
         myRatingsByItemId = Object.create(null);
         items.forEach((item) => {
@@ -418,7 +654,8 @@ async function refreshMyRatingsPageData(options = {}) {
         });
 
         updateMyPageProfile();
-        updateMyRatingsPageSections(items, Number(data?.total) || 0);
+        updateMyRatingsPageSections(items, Number(ratingsData?.total) || 0);
+        updateMyCommentsPageSection(myCommentItems, Number(commentsData?.total) || 0);
         syncMyRatingsAcrossSources();
 
         if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic' || currentPageKey === 'profileEdit')) {
@@ -434,6 +671,12 @@ async function refreshMyRatingsPageData(options = {}) {
         const myPageRecentSection = getMyPageRecentSection();
         if (myPageRecentSection) {
             myPageRecentSection.description = '최근 평점을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
+        }
+
+        const myCommentsSection = getMyPageCommentsSection();
+        if (myCommentsSection) {
+            myCommentsSection.description = '코멘트 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
+            myCommentsSection.items = [];
         }
 
         if (rerenderIfVisible && (currentPageKey === 'mypage' || currentPageKey === 'myRatedMusic' || currentPageKey === 'profileEdit')) {
@@ -553,6 +796,7 @@ function renderPage(pageKey) {
     const resolvedPageKey = getValidPageKey(pageKey);
     syncMyRatingsAcrossSources();
     const pageSections = pages[resolvedPageKey] || pages.home;
+    contentDisplay.setAttribute('data-page', resolvedPageKey);
     contentDisplay.innerHTML = renderSections(pageSections);
     applyAuthStateToRatingInputs();
     setActiveTab(pageActiveTabMap[resolvedPageKey] || resolvedPageKey);
@@ -586,9 +830,148 @@ function findMediaItemById(itemId) {
     return allItems.find((item) => item.id === itemId) || null;
 }
 
+function formatCommentDate(value) {
+    if (!value) {
+        return '방금 전';
+    }
+
+    const timestamp = new Date(value);
+    if (Number.isNaN(timestamp.getTime())) {
+        return '방금 전';
+    }
+
+    return timestamp.toLocaleString('ko-KR', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function renderCommentListMarkup(comments = []) {
+    if (!Array.isArray(comments) || !comments.length) {
+        return `
+            <div class="comment-empty-state">
+                아직 작성된 코멘트가 없습니다. 첫 코멘트를 남겨보세요.
+            </div>
+        `;
+    }
+
+    return comments.map((comment) => {
+        const isOwner = currentUser?.id && comment?.userId === currentUser.id;
+        const avatarUrl = comment?.user?.avatarUrl || createAvatarImage(comment?.user?.displayName || 'U');
+        const displayName = comment?.user?.displayName || '사용자';
+        const content = comment?.content || '';
+        const likeCount = Number(comment?.likeCount || 0);
+        const likedByMe = Boolean(comment?.likedByMe);
+        const likeButtonLabel = `♥ ${likeCount}`;
+
+        return `
+            <article class="comment-item" data-comment-id="${comment?.id || ''}">
+                <div class="comment-header">
+                    <div class="comment-user">
+                        <img class="comment-avatar" src="${avatarUrl}" alt="${displayName} 프로필" />
+                        <div>
+                            <strong>${displayName}</strong>
+                            <span>${formatCommentDate(comment?.createdAt)}</span>
+                        </div>
+                    </div>
+                    <div class="comment-actions">
+                        <button class="comment-like-button${likedByMe ? ' active' : ''}" type="button" data-comment-like="${comment?.id || ''}" aria-label="좋아요 ${likeButtonLabel}">
+                            ${likeButtonLabel}
+                        </button>
+                        ${isOwner ? `<button class="comment-edit-button" type="button" data-comment-edit="${comment?.id || ''}">수정</button>` : ''}
+                        ${isOwner ? `<button class="comment-delete-button" type="button" data-comment-delete="${comment?.id || ''}">삭제</button>` : ''}
+                    </div>
+                </div>
+                <p class="comment-content">${content}</p>
+            </article>
+        `;
+    }).join('');
+}
+
+function renderMyCommentMarkup(comment) {
+    if (!comment) {
+        return '';
+    }
+
+    const likeCount = Number(comment.likeCount || 0);
+    const likedByMe = Boolean(comment.likedByMe);
+    return `
+        <div class="my-comment-panel" data-my-comment-id="${comment.id || ''}">
+            <div class="my-comment-heading">
+                <strong>내 코멘트</strong>
+                <span>${formatCommentDate(comment.updatedAt || comment.createdAt)}${comment.updatedAt && comment.updatedAt !== comment.createdAt ? ' 수정됨' : ''}</span>
+            </div>
+            <textarea class="comment-input" data-comment-input rows="4" maxlength="2000">${comment.content || ''}</textarea>
+            <div class="my-comment-actions">
+                <button class="comment-like-button${likedByMe ? ' active' : ''}" type="button" data-comment-like="${comment.id || ''}" aria-label="좋아요 ♥ ${likeCount}">♥ ${likeCount}</button>
+                <button class="action comment-submit" type="submit" data-comment-submit>코멘트 수정</button>
+            </div>
+        </div>
+    `;
+}
+
+async function loadDetailComments(itemId, itemType) {
+    const commentList = contentDisplay.querySelector('[data-comment-list]');
+    const commentCount = contentDisplay.querySelector('[data-comment-count]');
+    const commentForm = contentDisplay.querySelector('[data-comment-form]');
+    const myCommentPanel = contentDisplay.querySelector('[data-my-comment-panel]');
+
+    if (!itemId || !commentList) {
+        return;
+    }
+
+    try {
+        const data = await fetchCommentsByItem({ itemId, itemType, limit: 20, offset: 0 });
+        const comments = Array.isArray(data?.items) ? data.items : [];
+        const myComment = isAuthenticated()
+            ? comments.find((comment) => comment?.userId === currentUser.id)
+            : null;
+        const otherComments = comments.filter((comment) => comment?.userId !== currentUser?.id);
+
+        commentList.innerHTML = renderCommentListMarkup(otherComments);
+        if (myCommentPanel) {
+            myCommentPanel.innerHTML = renderMyCommentMarkup(myComment);
+            myCommentPanel.classList.toggle('hidden', !myComment);
+        }
+        const newCommentField = commentForm?.querySelector('.comment-field');
+        const newCommentActions = commentForm?.querySelector('.comment-form-actions');
+        newCommentField?.classList.toggle('hidden', Boolean(myComment));
+        newCommentActions?.classList.toggle('hidden', Boolean(myComment));
+        if (commentCount) {
+            commentCount.textContent = `${Number(data?.total) || comments.length}개`;
+        }
+
+        if (commentForm) {
+            const textarea = commentForm.querySelector('[data-comment-input]');
+            if (textarea) {
+                textarea.disabled = !isAuthenticated();
+            }
+            const submitButton = commentForm.querySelector('[data-comment-submit]');
+            if (submitButton) {
+                submitButton.disabled = !isAuthenticated();
+            }
+
+            const formLabel = commentForm.querySelector('[data-comment-form-label]');
+            if (formLabel) {
+                formLabel.textContent = myComment ? '코멘트를 수정하세요.' : (isAuthenticated() ? '코멘트를 남겨주세요.' : 'Google 로그인 후 코멘트를 작성할 수 있습니다.');
+            }
+        }
+    } catch (error) {
+        console.error(error);
+        commentList.innerHTML = '<div class="comment-empty-state">코멘트를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>';
+        if (commentCount) {
+            commentCount.textContent = '0개';
+        }
+    }
+}
+
 function renderDetailPage(itemId, sourcePageKey = currentPageKey) {
     const mediaItem = findMediaItemById(itemId);
     const resolvedSourcePageKey = getValidPageKey(sourcePageKey);
+    contentDisplay.setAttribute('data-page', 'detail');
 
     if (!mediaItem) {
         contentDisplay.innerHTML = `
@@ -619,6 +1002,9 @@ function renderDetailPage(itemId, sourcePageKey = currentPageKey) {
         </div>
     ` : '';
 
+    const detailItemType = getItemTypeFromMediaItem(mediaItem);
+    const commentDisabledText = isAuthenticated() ? '코멘트를 남겨주세요.' : 'Google 로그인 후 코멘트를 작성할 수 있습니다.';
+
     contentDisplay.innerHTML = `
         <section class="content-card detail-card">
             <button class="detail-back-link" type="button" data-route="${resolvedSourcePageKey}">← 이전으로</button>
@@ -640,6 +1026,24 @@ function renderDetailPage(itemId, sourcePageKey = currentPageKey) {
                 </div>
             </div>
         </section>
+
+        <section class="content-card detail-comments-card">
+            <div class="detail-comments-header">
+                <h3>코멘트</h3>
+                <span data-comment-count>0개</span>
+            </div>
+            <form class="comment-form" data-comment-form data-item-id="${itemId}" data-item-type="${detailItemType}">
+                <div class="hidden" data-my-comment-panel></div>
+                <label class="comment-field">
+                    <span data-comment-form-label>${commentDisabledText}</span>
+                    <textarea class="comment-input" data-comment-input rows="4" maxlength="2000" placeholder="이 음악/앨범에 대한 생각을 남겨보세요." ${isAuthenticated() ? '' : 'disabled'}></textarea>
+                </label>
+                <div class="comment-form-actions">
+                    <button class="action comment-submit" type="submit" data-comment-submit ${isAuthenticated() ? '' : 'disabled'}>코멘트 작성</button>
+                </div>
+            </form>
+            <div class="comment-list" data-comment-list></div>
+        </section>
     `;
 
     applyAuthStateToRatingInputs();
@@ -647,6 +1051,8 @@ function renderDetailPage(itemId, sourcePageKey = currentPageKey) {
     currentPageKey = 'detail';
     currentDetailItemId = itemId;
     currentDetailSourcePageKey = resolvedSourcePageKey;
+
+    loadDetailComments(itemId, detailItemType);
 }
 
 function parseRouteFromHash(hashValue) {
@@ -1241,8 +1647,95 @@ if (searchPanel) {
     });
 }
 
-contentDisplay.addEventListener('click', (event) => {
+contentDisplay.addEventListener('click', async (event) => {
     if (event.target.closest('[data-rating-editor]')) {
+        return;
+    }
+
+    const likeButton = event.target.closest('[data-comment-like]');
+    if (likeButton) {
+        const commentId = likeButton.dataset.commentLike;
+        if (!commentId) {
+            return;
+        }
+
+        if (!isAuthenticated()) {
+            window.alert('Google 로그인 후 좋아요를 누를 수 있습니다.');
+            return;
+        }
+
+        const itemId = currentDetailItemId;
+        const item = findMediaItemById(itemId);
+        if (!item) {
+            return;
+        }
+
+        try {
+            await toggleCommentLike(commentId);
+            await loadDetailComments(itemId, getItemTypeFromMediaItem(item));
+        } catch (error) {
+            console.error(error);
+            window.alert(error instanceof Error ? error.message : '좋아요 처리 중 오류가 발생했습니다.');
+        }
+        return;
+    }
+
+    const editButton = event.target.closest('[data-comment-edit]');
+    if (editButton) {
+        const commentId = editButton.dataset.commentEdit;
+        if (!commentId) {
+            return;
+        }
+
+        const itemId = currentDetailItemId;
+        const item = findMediaItemById(itemId);
+        if (!item) {
+            return;
+        }
+
+        const targetItem = contentDisplay.querySelector(`[data-comment-id="${CSS.escape(commentId)}"]`);
+        const currentContent = targetItem?.querySelector('.comment-content')?.textContent?.trim() || '';
+        const nextContent = window.prompt('코멘트를 수정하세요.', currentContent);
+        if (nextContent === null) {
+            return;
+        }
+
+        const trimmedContent = nextContent.trim();
+        if (!trimmedContent || trimmedContent.length > 2000) {
+            window.alert('코멘트는 1~2000자 사이여야 합니다.');
+            return;
+        }
+
+        try {
+            await updateComment(commentId, { content: trimmedContent });
+            await loadDetailComments(itemId, getItemTypeFromMediaItem(item));
+        } catch (error) {
+            console.error(error);
+            window.alert(error instanceof Error ? error.message : '코멘트 수정 중 오류가 발생했습니다.');
+        }
+        return;
+    }
+
+    const deleteButton = event.target.closest('[data-comment-delete]');
+    if (deleteButton) {
+        const commentId = deleteButton.dataset.commentDelete;
+        if (!commentId) {
+            return;
+        }
+
+        const itemId = currentDetailItemId;
+        const item = findMediaItemById(itemId);
+        if (!item) {
+            return;
+        }
+
+        try {
+            await deleteComment(commentId);
+            await loadDetailComments(itemId, getItemTypeFromMediaItem(item));
+        } catch (error) {
+            console.error(error);
+            window.alert(error instanceof Error ? error.message : '코멘트 삭제 중 오류가 발생했습니다.');
+        }
         return;
     }
 
@@ -1252,6 +1745,14 @@ contentDisplay.addEventListener('click', (event) => {
 
         if (actionKey === 'save-profile-editor') {
             saveProfileEditor();
+        } else if (actionKey === 'open-featured-picker') {
+            openFeaturedMusicPicker(actionButton.dataset.slotIndex);
+        } else if (actionKey === 'close-featured-picker') {
+            closeFeaturedMusicPicker();
+        } else if (actionKey === 'select-featured-item') {
+            selectFeaturedMusicItem(actionButton.dataset.itemId);
+        } else if (actionKey === 'remove-featured-item') {
+            removeFeaturedMusicItem(actionButton.dataset.slotIndex);
         }
         return;
     }
@@ -1308,6 +1809,55 @@ contentDisplay.addEventListener('change', (event) => {
     }
 
     submitRatingChange(ratingSelect.dataset.itemId, ratingSelect.value);
+});
+
+contentDisplay.addEventListener('submit', async (event) => {
+    const commentForm = event.target.closest('[data-comment-form]');
+    if (!commentForm) {
+        return;
+    }
+
+    event.preventDefault();
+    if (!isAuthenticated()) {
+        window.alert('Google 로그인 후 코멘트를 작성할 수 있습니다.');
+        return;
+    }
+
+    const itemId = commentForm.dataset.itemId;
+    const itemType = commentForm.dataset.itemType || 'album';
+    const textarea = commentForm.querySelector('[data-comment-input]');
+    const content = textarea?.value.trim() || '';
+    if (!itemId || !content) {
+        return;
+    }
+
+    const mediaItem = findMediaItemById(itemId);
+    if (!mediaItem) {
+        return;
+    }
+
+    try {
+        const existingCommentId = commentForm.querySelector('[data-my-comment-id]')?.dataset.myCommentId;
+        if (existingCommentId) {
+            await updateComment(existingCommentId, { content });
+        } else {
+            await createComment({
+                itemId,
+                itemType,
+                title: mediaItem.title,
+                artist: mediaItem.artist,
+                image: mediaItem.image,
+                year: mediaItem.year,
+                content
+            });
+        }
+
+        textarea.value = '';
+        await loadDetailComments(itemId, itemType);
+    } catch (error) {
+        console.error(error);
+        window.alert(error instanceof Error ? error.message : '코멘트 작성 중 오류가 발생했습니다.');
+    }
 });
 
 contentDisplay.addEventListener('input', (event) => {

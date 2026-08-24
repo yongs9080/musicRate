@@ -132,6 +132,27 @@ Notes:
 - `updated_at`: DATETIME, default `CURRENT_TIMESTAMP`
 - `deleted_at`: DATETIME, NULL allowed
 
+### music_comments
+
+- `id`: TEXT, PK
+- `user_id`: TEXT, NOT NULL, FK -> `users.id`
+- `item_id`: TEXT, NOT NULL
+- `item_type`: TEXT, NOT NULL (`album` or `song`)
+- `title_snapshot`: TEXT, NOT NULL
+- `artist_snapshot`: TEXT, NULL allowed
+- `image_snapshot`: TEXT, NULL allowed
+- `year_snapshot`: TEXT, NULL allowed
+- `content`: TEXT, NOT NULL
+- `visibility`: TEXT, NOT NULL, default `public`
+- `created_at`: DATETIME, default `CURRENT_TIMESTAMP`
+- `updated_at`: DATETIME, default `CURRENT_TIMESTAMP`
+- `deleted_at`: DATETIME, NULL allowed
+
+Notes:
+
+- Stores per-item user comments independently from ratings/reviews.
+- Supports viewing public comments by item and listing my comments by user.
+
 ### reactions
 
 - `user_id`: TEXT, NOT NULL, FK -> `users.id`
