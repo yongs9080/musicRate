@@ -1,11 +1,16 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATABASE_PATH = path.join(__dirname, 'music-rate.sqlite');
+const DATABASE_PATH = process.env.DATABASE_PATH
+    ? path.resolve(process.env.DATABASE_PATH)
+    : path.join(__dirname, 'music-rate.sqlite');
+
+fs.mkdirSync(path.dirname(DATABASE_PATH), { recursive: true });
 
 function toIsoTimestamp(value) {
     if (!value) {

@@ -1326,6 +1326,11 @@ const server = http.createServer(async (req, res) => {
 
     const requestUrl = new URL(req.url || '/', `http://${req.headers.host || `localhost:${PORT}`}`);
 
+    if (requestUrl.pathname === '/health') {
+        sendJson(res, 200, { ok: true });
+        return;
+    }
+
     if (requestUrl.pathname === '/api/spotify/search') {
         await handleSpotifySearchApi(req, res, requestUrl);
         return;
